@@ -1,122 +1,107 @@
-import { useState } from 'react'
-import heroImg from './assets/hero.png'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import './App.css'
+import React, { useState } from 'react';
+import type { StepId } from './types';
+import { Header, Sidebar, StatusBar } from './components/layout';
+import {
+  HomeView,
+  SetupView,
+  AnalysisView,
+  VerificationView,
+  TestSpecView,
+} from './views';
 
-function App() {
-  const [count, setCount] = useState(0)
+export const App: React.FC = () => {
+  const [currentStep, setCurrentStep] = useState<StepId>('HOME');
+  const [projectName, setProjectName] = useState<string>('ThinkTree Notice Platform');
+  const [techStack, setTechStack] = useState<string>('Java · Spring Boot');
+  const [selectedRequirementId, setSelectedRequirementId] = useState<string>('NOTICE-001');
+
+  const handleSelectProject = (projectId: string) => {
+    setProjectName(`Project-${projectId}`);
+    setTechStack('Java · Spring Boot');
+    setCurrentStep('SETUP');
+  };
+
+  const handleProjectUpdated = (newProjectName: string) => {
+    setProjectName(newProjectName);
+  };
+
+  const handleSelectRequirementForTest = (reqId: string) => {
+    setSelectedRequirementId(reqId);
+    setCurrentStep('TEST_SPEC');
+  };
+
+  const handleSwitchProject = () => {
+    setCurrentStep('HOME');
+  };
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
-          <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
-          </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
+    <div className="flex flex-col h-screen w-screen bg-slate-50 text-slate-800 antialiased overflow-hidden select-none font-sans">
+      {/* 상단 글로벌 헤더 */}
+      <Header
+        currentStep={currentStep}
+        onStepChange={setCurrentStep}
+        projectName={projectName}
+        subtitle="요구사항과 코드의 연결을 확인하는 워크스페이스"
+      />
 
-      <div className="ticks"></div>
+      {/* 중앙 메인 작업 영역 */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* 홈 화면이 아닐 때만 좌측 사이드바 표시 */}
+        {currentStep !== 'HOME' && (
+          <Sidebar
+            currentStep={currentStep}
+            onStepChange={setCurrentStep}
+            onSwitchProject={handleSwitchProject}
+            projectName={projectName}
+            techStack={techStack}
+          />
+        )}
 
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
+        <main className="flex-1 overflow-y-auto bg-slate-50/60 p-4 md:p-6">
+          {currentStep === 'HOME' && (
+            <HomeView
+              onSelectProject={handleSelectProject}
+              onNavigateStep={setCurrentStep}
+            />
+          )}
 
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
-  )
-}
+          {currentStep === 'SETUP' && (
+            <SetupView
+              onNavigateStep={setCurrentStep}
+              onProjectUpdated={handleProjectUpdated}
+            />
+          )}
 
-export default App
+          {currentStep === 'ANALYSIS' && (
+            <AnalysisView
+              onNavigateStep={setCurrentStep}
+            />
+          )}
+
+          {currentStep === 'VERIFICATION' && (
+            <VerificationView
+              onNavigateStep={setCurrentStep}
+              onSelectRequirementForTest={handleSelectRequirementForTest}
+            />
+          )}
+
+          {currentStep === 'TEST_SPEC' && (
+            <TestSpecView
+              onNavigateStep={setCurrentStep}
+              selectedRequirementId={selectedRequirementId}
+            />
+          )}
+        </main>
+      </div>
+
+      {/* 하단 상태 바 */}
+      <StatusBar
+        specVersion={currentStep !== 'HOME' ? 'v0.2' : undefined}
+        codeSnapshot={currentStep !== 'HOME' ? 'S-014' : undefined}
+        language="한국어"
+      />
+    </div>
+  );
+};
+
+export default App;

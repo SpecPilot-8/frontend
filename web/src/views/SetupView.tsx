@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import type { StepId, AIModelOption, ProjectSetupData } from '../types';
-import { fetchAIModels, fetchProjectSetup } from '../services/api';
+import { fetchAIModels, fetchProjectSetup, saveProjectSetup, uploadDocument, uploadSourceCode } from '../services/api';
+import { useProject } from '../contexts/ProjectContext';
 import { useFileUpload } from '../hooks';
-import { Button, Card, Input } from '../components/common';
+import { Button, Card, Input, PageHeader } from '../components/common';
 import { VIEW_HEADER } from '../styles/typography';
 
 interface SetupViewProps {
@@ -16,17 +17,22 @@ export const SetupView: React.FC<SetupViewProps> = ({
   onProjectUpdated,
   initialData,
 }) => {
+  const { projectId, setProjectId } = useProject();
   const [setupData, setSetupData] = useState<ProjectSetupData | null>(initialData || null);
   const [aiModels, setAiModels] = useState<AIModelOption[]>([]);
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [codeSourceTab, setCodeSourceTab] = useState<'ZIP' | 'GIT'>('ZIP');
   const [isApiKeyChecked, setIsApiKeyChecked] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(!initialData);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [isSaving, setIsSaving] = useState<boolean>(false);
 
-  // 명세서 파일 업로드 Hook
+  const [specFile, setSpecFile] = useState<File | null>(null);
+  const [codeFile, setCodeFile] = useState<File | null>(null);
+
   const specUpload = useFileUpload({
     accept: '.pdf,.docx,.xlsx',
     onFileSelect: (selectedFile) => {
+      setSpecFile(selectedFile);
       const ext = selectedFile.name.split('.').pop() || 'pdf';
       handleUpdateField('specDocument', {
         name: selectedFile.name,
@@ -37,10 +43,10 @@ export const SetupView: React.FC<SetupViewProps> = ({
     },
   });
 
-  // 소스코드 ZIP 업로드 Hook
   const codeUpload = useFileUpload({
     accept: '.zip',
     onFileSelect: (selectedFile) => {
+      setCodeFile(selectedFile);
       handleUpdateField('sourceCode', {
         name: selectedFile.name,
         fileCount: 0,
@@ -50,7 +56,24 @@ export const SetupView: React.FC<SetupViewProps> = ({
   });
 
   useEffect(() => {
-    Promise.all([fetchAIModels(), fetchProjectSetup()])
+    if (!projectId) {
+      fetchAIModels()
+        .then((models) => {
+          setAiModels(models);
+          setSetupData({
+            projectName: '',
+            techStack: '',
+            codeScope: '',
+            apiKey: '',
+            apiKeyVerified: false,
+            selectedModelId: models.length > 0 ? models[0].id : '',
+          } as any);
+        })
+        .finally(() => setIsLoading(false));
+      return;
+    }
+
+    Promise.all([fetchAIModels(), fetchProjectSetup(projectId)])
       .then(([models, setup]) => {
         setAiModels(models);
         if (!initialData) {
@@ -63,7 +86,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       .finally(() => {
         setIsLoading(false);
       });
-  }, [initialData]);
+  }, [initialData, projectId]);
 
   const currentModel =
     aiModels.find((m) => m.id === setupData?.selectedModelId) || aiModels[0];
@@ -80,6 +103,37 @@ export const SetupView: React.FC<SetupViewProps> = ({
     }
   };
 
+  const handleStartAnalysis = async () => {
+    if (!setupData) return;
+    setIsSaving(true);
+    
+    try {
+      const response = await saveProjectSetup(setupData);
+      
+      if (response.success && response.projectId) {
+        const newProjectId = response.projectId;
+
+        // 화면 초기화를 막기 위해 파일을 모두 전송한 뒤에 setProjectId를 호출합니다.
+        if (specFile) {
+          await uploadDocument(newProjectId, specFile);
+        }
+        if (codeSourceTab === 'ZIP' && codeFile) {
+          await uploadSourceCode(newProjectId, codeFile);
+        }
+
+        setProjectId(newProjectId);
+        onNavigateStep('ANALYSIS');
+      } else {
+        alert('프로젝트 생성에 실패했습니다. 백엔드 연결을 확인해 주세요.');
+      }
+    } catch (error: any) {
+      console.error(error);
+      alert(`파일 업로드 오류: ${error.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   if (isLoading || !setupData) {
     return (
       <div className="max-w-[1080px] mx-auto py-12 text-center text-xs text-slate-400">
@@ -93,20 +147,16 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
   return (
     <div className="max-w-[1080px] mx-auto py-2 px-2 md:px-4 space-y-5">
-      <div>
-        <span className={VIEW_HEADER.stepTag}>01 / PROJECT SETUP</span>
-        <h1 className={VIEW_HEADER.title}>
-          {setupData.projectName ? '프로젝트 설정' : '새 프로젝트 만들기'}
-        </h1>
-        <p className={VIEW_HEADER.desc}>
-          {setupData.projectName
+      <PageHeader
+        stepTag="01 / PROJECT SETUP"
+        title={setupData.projectName ? '프로젝트 설정' : '새 프로젝트 만들기'}
+        description={
+          setupData.projectName
             ? '명세 문서와 검증할 코드를 연결하고 분석 범위를 확인하세요.'
-            : '먼저 명세와 코드를 연결하세요. 분석 설정은 이후에도 바꿀 수 있습니다.'}
-        </p>
-      </div>
+            : '먼저 명세와 코드를 연결하세요. 분석 설정은 이후에도 바꿀 수 있습니다.'
+        }/>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-        {/* 프로젝트와 분석 자료 */}
         <div className="lg:col-span-8">
           <Card
             title="프로젝트와 분석 자료"
@@ -114,7 +164,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
             className="flex flex-col justify-between space-y-5 h-full"
           >
             <div className="space-y-5">
-              {/* 프로젝트 이름 */}
               <div className="space-y-1.5">
                 <label className={VIEW_HEADER.fieldLabel}>프로젝트 이름</label>
                 <Input
@@ -125,7 +174,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 />
               </div>
 
-              {/* 숨겨진 파일 Input들 */}
               <input
                 type="file"
                 ref={specUpload.inputRef}
@@ -141,7 +189,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 className="hidden"
               />
 
-              {/* 명세 문서 영역 */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <label className={VIEW_HEADER.fieldLabel}>명세 문서</label>
@@ -199,7 +246,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 )}
               </div>
 
-              {/* 검증 대상 소스코드 영역 */}
               <div className="space-y-2">
                 <label className={VIEW_HEADER.fieldLabel}>검증 대상 소스코드</label>
                 <div className="flex items-center space-x-1.5">
@@ -267,7 +313,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
               </div>
             </div>
 
-            {/* 분석 기술 스택 및 코드 분석 범위 */}
             <div className="space-y-2 pt-2 border-t border-slate-100">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
@@ -299,13 +344,11 @@ export const SetupView: React.FC<SetupViewProps> = ({
         </div>
 
         <div className="lg:col-span-4 flex flex-col justify-between gap-5 h-full">
-          {/* AI 모델 연결 카드 */}
           <Card
             title="AI 모델 연결"
             description="분석에 사용할 모델의 연결 상태를 확인합니다."
             className="space-y-4"
           >
-            {/* 모델 드롭다운 */}
             <div className="space-y-1.5 relative">
               <label className={VIEW_HEADER.fieldLabel}>분석 모델</label>
               <button
@@ -376,7 +419,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
               )}
             </div>
 
-            {/* API 키 */}
             <div className="space-y-1.5">
               <label className={VIEW_HEADER.fieldLabel}>API 키</label>
               <Input
@@ -391,7 +433,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
               />
             </div>
 
-            {/* 연결 확인 상태 */}
             <div className="flex items-center justify-between pt-1">
               <span
                 className={`text-[11px] font-medium px-2 py-1 rounded-lg ${
@@ -420,7 +461,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
             </p>
           </Card>
 
-          {/* 이후 진행 순서 카드 */}
           <Card
             title="이후 진행 순서"
             description="등록한 자료를 기준으로 검증을 진행합니다."
@@ -454,7 +494,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
         </div>
       </div>
 
-      {/* 하단 액션 배너 */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <div className="text-xs font-semibold text-slate-800">
@@ -468,10 +507,11 @@ export const SetupView: React.FC<SetupViewProps> = ({
           type="button"
           variant="primary"
           size="lg"
-          onClick={() => onNavigateStep('ANALYSIS')}
+          onClick={handleStartAnalysis}
+          disabled={isSaving}
           className="whitespace-nowrap"
         >
-          명세 분석 시작
+          {isSaving ? '파일 업로드 중...' : '명세 분석 시작'}
         </Button>
       </div>
     </div>

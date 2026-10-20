@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { StepId, RequirementItem, ProjectSetupData } from '../types';
 import { fetchVerificationResults, fetchRequirements, fetchProjectSetup } from '../services/api';
-import { Button, Card, Input, StatusBadge } from '../components/common';
-import { VIEW_HEADER } from '../styles/typography';
+import { useProject } from '../contexts/ProjectContext';
+import { Button, Card, Input, StatusBadge, PageHeader } from '../components/common';
 
 interface VerificationViewProps {
   onNavigateStep: (step: StepId) => void;
@@ -19,7 +19,7 @@ export type VerificationStatus =
   | 'NEED_CHECK';     // 확인 필요
 
 export interface TraceabilityRow {
-  reqCode: string;
+  stable_key: string;
   featureName: string;
   status: VerificationStatus;
   statusLabel: string;
@@ -30,7 +30,7 @@ export interface TraceabilityRow {
 // 개발/목업용 추적표 데이터
 const mockTraceabilityRows: TraceabilityRow[] = [
   {
-    reqCode: 'NOTICE-001',
+    stable_key: 'NOTICE-001',
     featureName: '공지사항 목록 조회',
     status: 'IMPLEMENTED',
     statusLabel: '구현',
@@ -38,7 +38,7 @@ const mockTraceabilityRows: TraceabilityRow[] = [
     summary: '조회 조건과 응답 구조가 일치합니다.',
   },
   {
-    reqCode: 'NOTICE-002',
+    stable_key: 'NOTICE-002',
     featureName: '공지사항 작성',
     status: 'MISMATCHED',
     statusLabel: '불일치',
@@ -46,7 +46,7 @@ const mockTraceabilityRows: TraceabilityRow[] = [
     summary: '명세 300MB · 서버 제한 50MB',
   },
   {
-    reqCode: 'NOTICE-003',
+    stable_key: 'NOTICE-003',
     featureName: '공지사항 수정',
     status: 'PARTIAL',
     statusLabel: '부분구현',
@@ -54,7 +54,7 @@ const mockTraceabilityRows: TraceabilityRow[] = [
     summary: '첨부파일 교체 시 이전 파일 정리 누락',
   },
   {
-    reqCode: 'LOGIN-002',
+    stable_key: 'LOGIN-002',
     featureName: '소셜 로그인',
     status: 'NEED_CHECK',
     statusLabel: '확인 필요',
@@ -62,7 +62,7 @@ const mockTraceabilityRows: TraceabilityRow[] = [
     summary: '외부 인증 응답에 대한 근거 확인 필요',
   },
   {
-    reqCode: 'LOGIN-003',
+    stable_key: 'LOGIN-003',
     featureName: '회원가입',
     status: 'MISMATCHED',
     statusLabel: '불일치',
@@ -70,7 +70,7 @@ const mockTraceabilityRows: TraceabilityRow[] = [
     summary: '중복 이메일에 대한 안내가 없습니다.',
   },
   {
-    reqCode: 'USER-001',
+    stable_key: 'USER-001',
     featureName: '프로필 변경',
     status: 'UNIMPLEMENTED',
     statusLabel: '미구현 후보',
@@ -85,6 +85,9 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
   requirementsData,
   setupData,
 }) => {
+  // 🚀 전역 보관소에서 projectId 꺼내기
+  const { projectId } = useProject();
+
   const [projectSetup, setProjectSetup] = useState<ProjectSetupData | null>(setupData || null);
   const [requirementsList, setRequirementsList] = useState<RequirementItem[]>(requirementsData || []);
   const [isVerified, setIsVerified] = useState<boolean>(false);
@@ -104,9 +107,10 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
       );
     }
 
-    if (requirementsList.length === 0) {
+    // projectId가 존재할 때만 fetchRequirements에 인자로 넘겨 호출
+    if (requirementsList.length === 0 && projectId) {
       promises.push(
-        fetchRequirements().then((res) => {
+        fetchRequirements(projectId).then((res) => {
           if (res) setRequirementsList(res);
         }).catch(() => {})
       );
@@ -126,11 +130,11 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
           setIsVerified(false);
         });
     });
-  }, [projectSetup, requirementsList.length]);
+  }, [projectSetup, requirementsList.length, projectId]);
 
   const confirmedRequirementsCount = useMemo(() => {
     return requirementsList.filter(
-      (r) => r.status === 'VERIFIED' || r.status === 'COMPLETED' || r.reviewStatus === 'CONFIRMED'
+      (r) => r.review_status === 'approved'
     ).length;
   }, [requirementsList]);
 
@@ -160,7 +164,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
   const filteredData = useMemo(() => {
     return tableData.filter((row) => {
       const matchSearch =
-        row.reqCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        row.stable_key.toLowerCase().includes(searchQuery.toLowerCase()) ||
         row.featureName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         row.linkedCode.toLowerCase().includes(searchQuery.toLowerCase());
       const matchStatus =
@@ -193,13 +197,11 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
   if (!isVerified) {
     return (
       <div className="max-w-[1180px] mx-auto py-2 px-2 md:px-4 space-y-4">
-        <div>
-          <span className={VIEW_HEADER.stepTag}>03 / VERIFICATION RESULTS</span>
-          <h1 className={VIEW_HEADER.title}>검증 결과를 아직 만들지 못했습니다.</h1>
-          <p className={VIEW_HEADER.desc}>
-            검증이 완료되면 요구사항별 구현 상태와 코드 근거가 여기에 표시됩니다.
-          </p>
-        </div>
+        <PageHeader
+          stepTag="03 / VERIFICATION RESULTS"
+          title="검증 결과를 아직 만들지 못했습니다."
+          description="검증이 완료되면 요구사항별 구현 상태와 코드 근거가 여기에 표시됩니다."
+        />
 
         <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-4 text-xs">
           <div className="font-semibold text-amber-800">
@@ -300,29 +302,27 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
   // 검증 완료 화면
   return (
     <div className="max-w-[1180px] mx-auto py-2 px-2 md:px-4 space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <span className={VIEW_HEADER.stepTag}>03 / VERIFICATION RESULTS</span>
-          <h1 className={VIEW_HEADER.title}>검증 결과</h1>
-          <p className={VIEW_HEADER.desc}>
-            확정한 요구사항 {stats.total}개를 코드 {snapshotLabel}와 비교했습니다.
-          </p>
-        </div>
-        <Button
-          type="button"
-          variant="primary"
-          size="lg"
-          onClick={() => {
-            if (onSelectRequirementForTest && tableData.length > 0) {
-              onSelectRequirementForTest(tableData[0].reqCode);
-            }
-            onNavigateStep('TEST_SPEC');
-          }}
-          className="whitespace-nowrap self-start sm:self-center"
-        >
-          테스트 사양서
-        </Button>
-      </div>
+      <PageHeader
+        stepTag="03 / VERIFICATION RESULTS"
+        title="검증 결과"
+        description={`확정한 요구사항 ${stats.total}개를 코드 ${snapshotLabel}와 비교했습니다.`}
+        action={
+          <Button
+            type="button"
+            variant="primary"
+            size="lg"
+            onClick={() => {
+              if (onSelectRequirementForTest && tableData.length > 0) {
+                onSelectRequirementForTest(tableData[0].stable_key);
+              }
+              onNavigateStep('TEST_SPEC');
+            }}
+            className="whitespace-nowrap"
+          >
+            테스트 사양서
+          </Button>
+        }
+      />
 
       {/* 5종 통계 카드 */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
@@ -406,9 +406,9 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {filteredData.map((row) => (
-                <tr key={row.reqCode} className="hover:bg-slate-50/60 transition-colors">
+                <tr key={row.stable_key} className="hover:bg-slate-50/60 transition-colors">
                   <td className="py-3 px-4 font-mono font-bold text-blue-600">
-                    {row.reqCode}
+                    {row.stable_key}
                   </td>
                   <td className="py-3 px-4 font-medium text-slate-800">
                     {row.featureName}
@@ -427,7 +427,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
                       type="button"
                       onClick={() => {
                         if (onSelectRequirementForTest) {
-                          onSelectRequirementForTest(row.reqCode);
+                          onSelectRequirementForTest(row.stable_key);
                         }
                         onNavigateStep('TEST_SPEC');
                       }}

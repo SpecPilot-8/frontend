@@ -1,7 +1,8 @@
-import React, { useState, useMemo } from 'react';
-import type { StepId, RequirementItem, AcceptanceCriteria } from '../types';
+import React, { useState, useMemo, useEffect } from 'react';
+import type { StepId, RequirementItem, Condition } from '../types';
 import { fetchRequirements } from '../services/api';
-import { Button, Card, Input, StatusBadge } from '../components/common';
+import { useProject } from '../contexts/ProjectContext';
+import { Button, Card, Input, StatusBadge, PageHeader } from '../components/common';
 import { VIEW_HEADER } from '../styles/typography';
 
 interface AnalysisViewProps {
@@ -10,20 +11,22 @@ interface AnalysisViewProps {
   specVersion?: string;
 }
 
+const BASE_URL = 'http://127.0.0.1:8000/api/v2';
+
 export const AnalysisView: React.FC<AnalysisViewProps> = ({
   onNavigateStep,
   specDocumentName = '한성대_specpilot_기획서_v0.2.pdf',
   specVersion = 'v0.2',
 }) => {
+  const { projectId } = useProject();
+
   const [requirements, setRequirements] = useState<RequirementItem[]>([]);
   const [selectedId, setSelectedId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  // 화면 모드 상태
   const [viewMode, setViewMode] = useState<'VIEW' | 'ADD' | 'EDIT'>('ADD');
 
-  // 입력 폼 상태
   const [formReqId, setFormReqId] = useState('');
   const [formTitle, setFormTitle] = useState('');
   const [formDesc, setFormDesc] = useState('');
@@ -33,36 +36,87 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   const [formAction, setFormAction] = useState('');
   const [formExpected, setFormExpected] = useState('');
 
-  // 목업 데이터 로드 및 초기화 토글
-  const handleToggleMockData = () => {
-    if (requirements.length > 0) {
-      setRequirements([]);
-      setSelectedId('');
-      setViewMode('ADD');
-    } else {
-      setIsLoading(true);
-      fetchRequirements()
-        .then((data) => {
-          setRequirements(data);
-          if (data.length > 0) {
-            const defaultItem = data.find((r) => r.reqCode === 'NOTICE-002') || data[0];
-            setSelectedId(defaultItem.id);
-            setViewMode('VIEW');
-          }
-        })
-        .finally(() => {
-          setIsLoading(false);
-        });
+  // 데이터 새로고침 및 선택된 ID 유지 로직 통합
+  const loadData = async (preserveId?: string) => {
+    if (!projectId) return;
+    setIsLoading(true);
+    try {
+      const data = await fetchRequirements(projectId);
+      setRequirements(data);
+      if (data.length > 0) {
+        const targetId = typeof preserveId === 'string' ? preserveId : selectedId;
+        const exists = data.find(r => r.id === targetId);
+        
+        if (exists) {
+          setSelectedId(exists.id);
+        } else {
+          const defaultItem = data.find((r) => r.stable_key === 'NOTICE-002') || data[0];
+          setSelectedId(defaultItem.id);
+        }
+        setViewMode('VIEW');
+      } else {
+        setViewMode('ADD');
+      }
+    } catch (error) {
+      console.error('데이터 로딩 중 에러:', error);
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  // 검색어 필터링
+  useEffect(() => {
+    loadData();
+  }, [projectId]);
+
+  const handleRefreshData = () => loadData();
+
+  const handleStartAIAnalysis = async () => {
+    if (!projectId) return;
+    setIsLoading(true);
+    try {
+      const docRes = await fetch(`${BASE_URL}/projects/${projectId}/documents`);
+      const docData = await docRes.json();
+      if (!docData.items || docData.items.length === 0) {
+        alert('백엔드에 등록된 기획서 문서가 없습니다. 프로젝트 설정에서 파일을 먼저 업로드하세요.');
+        setIsLoading(false);
+        return;
+      }
+      
+      const docId = docData.items[0].id;
+      const docRev = docData.items[0].revision || 1;
+
+      await fetch(`${BASE_URL}/projects/${projectId}/documents/${docId}/parse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ document_revision: docRev })
+      });
+
+      const extRes = await fetch(`${BASE_URL}/projects/${projectId}/documents/${docId}/requirements/extract`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ document_revision: docRev, model_config_version: 0, accept_warnings: true })
+      });
+      const extJob = await extRes.json();
+
+      if (extJob.status === 'blocked' || extJob.status === 'failed') {
+        alert(`[백엔드 분석 차단됨]\n사유: ${extJob.missing_features?.[0]?.message || 'AI 모델 어댑터 미연결'}\n\n자동 분석이 불가능하므로 좌측 폼에서 요구사항을 수동으로 입력해 주세요.`);
+      } else {
+        alert('AI 분석 작업이 백그라운드에서 시작되었습니다.');
+        await loadData();
+      }
+    } catch (error) {
+      console.error(error);
+      alert('AI 분석 요청 중 통신 오류가 발생했습니다.');
+      setIsLoading(false);
+    }
+  };
+
   const filteredRequirements = useMemo(() => {
     if (!searchQuery.trim()) return requirements;
     const query = searchQuery.toLowerCase();
     return requirements.filter(
       (r) =>
-        r.reqCode.toLowerCase().includes(query) ||
+        r.stable_key.toLowerCase().includes(query) ||
         r.title.toLowerCase().includes(query)
     );
   }, [requirements, searchQuery]);
@@ -70,24 +124,22 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   const selectedReq = requirements.find((r) => r.id === selectedId) || filteredRequirements[0];
 
   const completedCount = requirements.filter(
-    (r) => r.status === 'VERIFIED' || r.status === 'COMPLETED'
+    (r) => r.review_status === 'approved'
   ).length;
 
-  // 수정 모드 진입
   const handleStartEdit = () => {
     if (!selectedReq) return;
-    setFormReqId(selectedReq.reqCode);
+    setFormReqId(selectedReq.stable_key);
     setFormTitle(selectedReq.title);
-    setFormDesc(selectedReq.originalText || selectedReq.description || '');
-    setFormLocation(selectedReq.sourcePage || '문서 8페이지');
-    setFormActor(selectedReq.actor || '관리자');
+    setFormDesc(selectedReq.original_text || '');
+    setFormLocation('');
+    setFormActor('');
     setFormCondition(selectedReq.condition || '');
     setFormAction(selectedReq.action || '');
-    setFormExpected(selectedReq.expectedResult || '');
+    setFormExpected(selectedReq.expected || '');
     setViewMode('EDIT');
   };
 
-  // 등록 모드 진입
   const handleStartAdd = () => {
     setFormReqId(`NOTICE-00${requirements.length + 1}`);
     setFormTitle('');
@@ -100,100 +152,134 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     setViewMode('ADD');
   };
 
-  // 요구사항 저장 및 등록
-  const handleSubmitForm = (e: React.FormEvent) => {
+  // 수정 요청 시 금지된 필드(original_text)를 제외하고 안전한 데이터만 전송하도록 수정
+  const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formTitle.trim()) return;
+    if (!formTitle.trim() || !projectId) return;
+    setIsLoading(true);
 
-    if (viewMode === 'EDIT' && selectedReq) {
-      const updatedList = requirements.map((item) => {
-        if (item.id === selectedReq.id) {
-          return {
-            ...item,
-            reqCode: formReqId.trim() || item.reqCode,
+    try {
+      const docRes = await fetch(`${BASE_URL}/projects/${projectId}/documents`);
+      const docData = await docRes.json();
+      const docId = docData.items?.[0]?.id;
+      const docRev = docData.items?.[0]?.revision || 1;
+
+      if (viewMode === 'EDIT' && selectedReq) {
+        const patchRes = await fetch(`${BASE_URL}/projects/${projectId}/requirements/${selectedReq.id}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            base_revision: (selectedReq as any).revision || 1,
             title: formTitle,
-            description: formDesc,
-            originalText: formDesc,
-            sourcePage: formLocation,
-            actor: formActor,
             condition: formCondition,
             action: formAction,
-            expectedResult: formExpected,
-          };
+            expected: formExpected
+          })
+        });
+
+        if (!patchRes.ok) {
+          const errData = await patchRes.json().catch(() => ({}));
+          throw new Error(errData.error?.message || '수정 요청이 거절되었습니다.');
         }
-        return item;
-      });
-      setRequirements(updatedList);
-      setViewMode('VIEW');
-    } else {
-      const defaultCriteria: AcceptanceCriteria[] = [
-        {
-          id: `AC-${Date.now()}-1`,
-          category: '입력값 검증',
-          description: '필수 입력 항목 검증',
-          count: 3,
-        },
-        {
-          id: `AC-${Date.now()}-2`,
-          category: '경로 및 이동',
-          description: '등록 API 호출 · 완료 후 목록 이동',
-          count: 3,
-        },
-        {
-          id: `AC-${Date.now()}-3`,
-          category: '비즈니스 로직',
-          description: formDesc || '권한 및 업무 규칙 검증',
-          count: 3,
-        },
-      ];
 
-      const newReq: RequirementItem = {
-        id: `REQ-${Date.now().toString().slice(-4)}`,
-        reqCode: formReqId.trim() || `NOTICE-00${requirements.length + 1}`,
-        title: formTitle,
-        description: formDesc,
-        originalText: formDesc || '입력된 원문 내용이 없습니다.',
-        sourceDoc: specDocumentName,
-        sourcePage: formLocation || '문서 8페이지',
-        category: '기능 요구사항',
-        status: 'PENDING',
-        reviewStatus: 'UNREVIEWED',
-        actor: formActor || '관리자',
-        condition: formCondition || '첨부파일 ≤ 300MB',
-        action: formAction || formTitle,
-        expectedResult: formExpected || '목록으로 이동',
-        criteria: defaultCriteria,
-        acceptanceCriteria: defaultCriteria,
-      };
+        await loadData(selectedReq.id); // 수정한 항목 포커스 유지
+      } else {
+        if (!docId) throw new Error("업로드된 기획서가 없습니다.");
+        
+        const postRes = await fetch(`${BASE_URL}/projects/${projectId}/requirements`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            document_id: docId,
+            document_revision: docRev,
+            title: formTitle,
+            original_text: formDesc || '입력된 원문 내용이 없습니다.',
+            condition: formCondition || '첨부파일 제한',
+            action: formAction || formTitle,
+            expected: formExpected || '목록으로 이동',
+            req_type: 'functional',
+            origin: 'manual',
+            author_reason: '수동 추가',
+            conditions: [
+              {
+                stable_key: formReqId.trim() || `REQ-${Date.now()}`,
+                text: formExpected || '기본 수락 조건',
+                category: 'business_logic',
+                target: 'unknown',
+                verifiable: 'code',
+                source_refs: []
+              }
+            ]
+          })
+        });
 
-      setRequirements((prev) => [newReq, ...prev]);
-      setSelectedId(newReq.id);
-      setViewMode('VIEW');
+        if (!postRes.ok) {
+          const errData = await postRes.json().catch(() => ({}));
+          throw new Error(errData.error?.message || '등록 요청이 거절되었습니다.');
+        }
+
+        const newData = await postRes.json();
+        await loadData(newData.id); // 새로 추가한 항목 포커스 유지
+      }
+    } catch (error: any) {
+      console.error(error);
+      alert(`요구사항 저장 중 오류가 발생했습니다.\n${error.message}`);
+      setIsLoading(false);
     }
   };
 
-  // 로딩 화면
+  const handleApproveRequirement = async () => {
+    if (!selectedReq || !projectId) return;
+    setIsLoading(true);
+
+    try {
+      const response = await fetch(`${BASE_URL}/projects/${projectId}/requirements/${selectedReq.id}/review`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          base_revision: (selectedReq as any).revision || 1,
+          status: 'approved'
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error('검토 확정에 실패했습니다.');
+      }
+
+      await loadData(selectedReq.id); // 확정 항목 포커스 유지
+    } catch (error) {
+      console.error(error);
+      alert('요구사항 확정 처리 중 오류가 발생했습니다.');
+      setIsLoading(false);
+    }
+  };
+
+  const handleGoToVerification = () => {
+    const hasApproved = requirements.some(req => req.review_status === 'approved');
+    if (!hasApproved) {
+      alert("검토가 완료(확정)된 요구사항이 최소 1개 이상 필요합니다.\n\n먼저 '검토 확정' 버튼을 눌러 승인해 주세요.");
+      return;
+    }
+    onNavigateStep('VERIFICATION');
+  };
+
   if (isLoading) {
     return (
       <div className="max-w-[1180px] mx-auto py-12 text-center text-xs text-slate-400">
-        요구사항 명세를 불러오는 중입니다...
+        요구사항 데이터를 불러오고 있습니다...
       </div>
     );
   }
 
-  // 등록 화면
   if (viewMode === 'ADD' || requirements.length === 0) {
     return (
       <div className="max-w-[1180px] mx-auto py-2 px-2 md:px-4 space-y-4">
-        <div>
-          <span className={VIEW_HEADER.stepTag}>02 / REQUIREMENT ANALYSIS</span>
-          <h1 className={VIEW_HEADER.title}>요구사항을 등록해 주세요</h1>
-          <p className={VIEW_HEADER.desc}>
-            명세를 자동 분석하거나, 원문을 보면서 요구사항을 직접 입력할 수 있습니다.
-          </p>
-        </div>
+        <PageHeader
+          stepTag="02 / REQUIREMENT ANALYSIS"
+          title="요구사항을 등록해 주세요"
+          description="명세를 자동 분석하거나, 원문을 보면서 요구사항을 직접 입력할 수 있습니다."
+        />
 
-        {/* 연결 안내 배너 */}
         <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-4 text-xs">
           <div className="font-semibold text-amber-800">
             AI 분석 서비스에 연결하지 못했습니다.
@@ -204,7 +290,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-          {/* 입력 폼 */}
           <div className="lg:col-span-8">
             <Card
               title="요구사항 직접 입력"
@@ -290,7 +375,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
             </Card>
           </div>
 
-          {/* 안내 및 설정 패널 */}
           <div className="lg:col-span-4">
             <Card
               title="자동 분석을 사용하려면"
@@ -307,6 +391,15 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                 <div className="space-y-2 pt-2">
                   <Button
                     type="button"
+                    variant="primary"
+                    size="md"
+                    onClick={handleStartAIAnalysis}
+                    className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    AI 분석 시작
+                  </Button>
+                  <Button
+                    type="button"
                     variant="secondary"
                     size="md"
                     onClick={() => onNavigateStep('SETUP')}
@@ -318,10 +411,10 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                     type="button"
                     variant="ghost"
                     size="md"
-                    onClick={handleToggleMockData}
+                    onClick={handleRefreshData}
                     className="w-full bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200"
                   >
-                    목업 데이터로 화면 확인
+                    데이터 새로고침
                   </Button>
                 </div>
               </div>
@@ -336,17 +429,14 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     );
   }
 
-  // 수정 화면
   if (viewMode === 'EDIT' && selectedReq) {
     return (
       <div className="max-w-[1180px] mx-auto py-2 px-2 md:px-4 space-y-4">
-        <div>
-          <span className={VIEW_HEADER.stepTag}>02 / REQUIREMENT ANALYSIS</span>
-          <h1 className={VIEW_HEADER.title}>요구사항 수정</h1>
-          <p className={VIEW_HEADER.desc}>
-            원문 내용과 구조화된 수락 조건 속성을 수정합니다.
-          </p>
-        </div>
+        <PageHeader
+          stepTag="02 / REQUIREMENT ANALYSIS"
+          title="요구사항 수정"
+          description="원문 내용과 구조화된 수락 조건 속성을 수정합니다."
+        />
 
         <Card>
           <form onSubmit={handleSubmitForm} className="space-y-5">
@@ -357,6 +447,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                   type="text"
                   value={formReqId}
                   onChange={(e) => setFormReqId(e.target.value)}
+                  disabled
                 />
               </div>
               <div className="space-y-1.5">
@@ -374,8 +465,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
               <textarea
                 rows={3}
                 value={formDesc}
-                onChange={(e) => setFormDesc(e.target.value)}
-                className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg text-slate-800 placeholder-slate-400 focus:outline-none focus:border-blue-500 resize-none"
+                disabled
+                className="w-full px-3 py-2 text-xs border border-slate-200 bg-slate-50 rounded-lg text-slate-500 cursor-not-allowed resize-none"
               />
             </div>
 
@@ -447,45 +538,42 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     );
   }
 
-  // 상세 조회 화면
   return (
     <div className="max-w-[1180px] mx-auto py-2 px-2 md:px-4 space-y-4">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div>
-          <span className={VIEW_HEADER.stepTag}>02 / REQUIREMENT ANALYSIS</span>
-          <h1 className={VIEW_HEADER.title}>명세 분석</h1>
-          <p className={VIEW_HEADER.desc}>
-            원문에서 추출한 요구사항과 수락 조건을 확인하고 확정하세요.
-          </p>
-        </div>
-        <div className="flex items-center space-x-2 self-start sm:self-center">
-          <Button
-            type="button"
-            variant="ghost"
-            size="md"
-            onClick={handleToggleMockData}
-          >
-            목업 비우기
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            size="md"
-            onClick={handleStartAdd}
-          >
-            + 새 요구사항 등록
-          </Button>
-          <Button
-            type="button"
-            variant="primary"
-            size="lg"
-            onClick={() => onNavigateStep('VERIFICATION')}
-            className="whitespace-nowrap"
-          >
-            확정한 명세로 검증
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        stepTag="02 / REQUIREMENT ANALYSIS"
+        title="명세 분석"
+        description="원문에서 추출한 요구사항과 수락 조건을 확인하고 확정하세요."
+        action={
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="md"
+              onClick={handleRefreshData}
+            >
+              데이터 새로고침
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              size="md"
+              onClick={handleStartAdd}
+            >
+              + 새 요구사항 등록
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="lg"
+              onClick={handleGoToVerification}
+              className="whitespace-nowrap"
+            >
+              확정한 명세로 검증
+            </Button>
+          </>
+        }
+      />
 
       <div className="flex items-center justify-between text-xs text-slate-500 px-1">
         <div>
@@ -499,7 +587,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-        {/* 목록 패널 */}
         <div className="lg:col-span-4">
           <Card
             title="요구사항 목록"
@@ -534,7 +621,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                       }`}
                     >
                       <div className="text-xs font-bold leading-tight">
-                        {item.reqCode}
+                        {item.stable_key}
                       </div>
                       <div className="text-xs font-medium text-slate-800 mt-1 truncate">
                         {item.title}
@@ -554,7 +641,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           </Card>
         </div>
 
-        {/* 상세 정보 패널 */}
         {selectedReq && (
           <div className="lg:col-span-8">
             <Card className="flex flex-col justify-between h-full space-y-5">
@@ -562,13 +648,13 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                 <div className="flex items-start justify-between gap-3">
                   <div>
                     <h2 className="text-base font-bold text-slate-900">
-                      {selectedReq.reqCode} · {selectedReq.title}
+                      {selectedReq.stable_key} · {selectedReq.title}
                     </h2>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      문서 {selectedReq.sourcePage} · {selectedReq.category}
+                      기능 유형 · {selectedReq.req_type === 'functional' ? '기능 요구사항' : '비기능 요구사항'}
                     </p>
                   </div>
-                  <StatusBadge status="검토 완료" />
+                  <StatusBadge status={selectedReq.review_status === 'approved' ? '검토 완료' : '검토 필요'} />
                 </div>
 
                 <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 space-y-1">
@@ -576,18 +662,17 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                     명세 원문
                   </span>
                   <p className="text-xs text-slate-700 leading-relaxed font-normal">
-                    {selectedReq.originalText || selectedReq.description}
+                    {selectedReq.original_text}
                   </p>
                 </div>
 
-                {/* 핵심 속성 */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
                   <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-3">
                     <span className="text-[10px] text-slate-400 block mb-0.5">
-                      행위자
+                      기능/비기능
                     </span>
                     <span className="text-xs font-semibold text-slate-800">
-                      {selectedReq.actor || '관리자'}
+                      {selectedReq.req_type === 'functional' ? '기능 요구사항' : '비기능 요구사항'}
                     </span>
                   </div>
                   <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-3">
@@ -611,54 +696,53 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                       기대 결과
                     </span>
                     <span className="text-xs font-semibold text-slate-800 truncate block">
-                      {selectedReq.expectedResult || '목록으로 이동'}
+                      {selectedReq.expected || '목록으로 이동'}
                     </span>
                   </div>
                 </div>
 
-                {/* 수락 조건 */}
                 <div className="space-y-2 pt-1">
                   <div className="flex items-center justify-between">
                     <h3 className="text-xs font-bold text-slate-900">수락 조건</h3>
                     <span className="text-[11px] text-slate-400">
-                      {selectedReq.acceptanceCriteria?.length ?? 5}개 항목
+                      {selectedReq.conditions?.length ?? 0}개 항목
                     </span>
                   </div>
 
                   <div className="space-y-1.5">
-                    {(selectedReq.acceptanceCriteria || []).map(
-                      (ac: AcceptanceCriteria, idx: number) => (
-                        <div
-                          key={ac.id || idx}
-                          className="bg-slate-50/60 border border-slate-200/50 rounded-xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center text-xs gap-2"
-                        >
-                          <span className="font-semibold text-slate-600 sm:w-28 shrink-0">
-                            {ac.category} {ac.count ? `(${ac.count})` : ''}
-                          </span>
-                          <span className="text-slate-700 flex-1">
-                            {ac.description}
-                          </span>
-                        </div>
-                      )
-                    )}
+                    {(selectedReq.conditions || []).map((ac: Condition, idx: number) => (
+                      <div
+                        key={ac.id || idx}
+                        className="bg-slate-50/60 border border-slate-200/50 rounded-xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center text-xs gap-2"
+                      >
+                        <span className="font-semibold text-slate-600 sm:w-28 shrink-0">
+                          {ac.category}
+                        </span>
+                        <span className="text-slate-700 flex-1">
+                          {ac.text}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
 
-              {/* 하단 제어 바 */}
               <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
                 <span className="text-xs font-semibold text-emerald-600">
-                  검토 상태: 확정됨
+                  검토 상태: {selectedReq.review_status === 'approved' ? '확정됨' : '대기 중'}
                 </span>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="md"
-                  onClick={handleStartEdit}
-                >
-                  요구사항 수정
-                </Button>
+                <div className="flex items-center space-x-2">
+                  <Button type="button" variant="secondary" size="md" onClick={handleStartEdit}>
+                    요구사항 수정
+                  </Button>
+                  {selectedReq.review_status !== 'approved' && (
+                    <Button type="button" variant="primary" size="md" onClick={handleApproveRequirement}>
+                      검토 확정
+                    </Button>
+                  )}
+                </div>
               </div>
+
             </Card>
           </div>
         )}

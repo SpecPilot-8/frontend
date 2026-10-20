@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { RecentProject, StepId } from '../types';
 import { fetchRecentProjects } from '../services/api';
+import { useProject } from '../contexts/ProjectContext'; // 전역 보관소 불러오기
 import { Button, Card, StatusBadge, EmptyState } from '../components/common';
 
 interface HomeViewProps {
@@ -12,6 +13,9 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onSelectProject,
   onNavigateStep,
 }) => {
+  // 전역 보관소에서 setProjectId 함수 꺼내기
+  const { setProjectId } = useProject();
+
   const [projects, setProjects] = useState<RecentProject[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
@@ -21,6 +25,20 @@ export const HomeView: React.FC<HomeViewProps> = ({
       .catch((error) => console.error('Failed to load recent projects:', error))
       .finally(() => setIsLoading(false));
   }, []);
+
+  // '새 프로젝트 설정 시작' 또는 '새 프로젝트 추가' 버튼 클릭 시
+  const handleStartNewSetup = () => {
+    // 새 프로젝트를 만들 때는 아직 확정된 ID가 없으므로 보관소를 비워줍니다.
+    setProjectId(null);
+    onNavigateStep('SETUP');
+  };
+
+  // 목록에서 기존 프로젝트 '열기' 버튼 클릭 시
+  const handleOpenProject = (id: string) => {
+    // 전역 보관소에 선택한 프로젝트의 ID를 저장합니다.
+    setProjectId(id);
+    onSelectProject(id);
+  };
 
   return (
     <div className="max-w-4xl mx-auto py-8 px-6 space-y-6">
@@ -39,7 +57,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </div>
         <Button
           variant="primary"
-          onClick={() => onNavigateStep('SETUP')}
+          onClick={handleStartNewSetup}
           className="shrink-0"
         >
           새 프로젝트 설정 시작
@@ -68,7 +86,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <Button
                 variant="secondary"
                 size="sm"
-                onClick={() => onNavigateStep('SETUP')}
+                onClick={handleStartNewSetup}
               >
                 새 프로젝트 추가
               </Button>
@@ -98,7 +116,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <Button
                   variant="secondary"
                   size="sm"
-                  onClick={() => onSelectProject(project.id)}
+                  onClick={() => handleOpenProject(project.id)}
                 >
                   열기
                 </Button>

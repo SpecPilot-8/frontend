@@ -26,7 +26,7 @@ const mockTestSpecGroup: TestSpecificationGroup = {
       priority: 'HIGH',
       procedure: '1. 제목/본문 입력 -> 2. 30MB PDF 파일 첨부 -> 3. 저장 버튼 클릭',
       inputValue: 'title="시스템 점검 안내", file="guide.pdf (30MB)"',
-      expectedResult: '201 Created 응답 반환 및 상세 페이지로 이동, 파일 다운로드 정상 동작',
+      expected: '201 Created 응답 반환 및 상세 페이지로 이동, 파일 다운로드 정상 동작',
       codeBasedPrediction: 'NoticeService.java:34 메서드 검증 통과 예상',
     },
     {
@@ -39,7 +39,7 @@ const mockTestSpecGroup: TestSpecificationGroup = {
       priority: 'HIGH',
       procedure: '1. 제목/본문 입력 -> 2. 200MB 동영상 첨부 -> 3. 전송 시도',
       inputValue: 'file="video_manual.mp4 (200MB)"',
-      expectedResult: '명세상 300MB까지 허용되어 200MB 정상 업로드 기대',
+      expected: '명세상 300MB까지 허용되어 200MB 정상 업로드 기대',
       codeBasedPrediction: '서버 multipart max-file-size 50MB 제한으로 413 Payload Too Large 발생 예측',
     },
     {
@@ -52,7 +52,7 @@ const mockTestSpecGroup: TestSpecificationGroup = {
       priority: 'MEDIUM',
       procedure: '1. 제목 공란 유지 -> 2. 본문만 입력 -> 3. 저장 버튼 클릭',
       inputValue: 'title="", content="내용 테스트"',
-      expectedResult: '전송 차단 및 "제목을 입력해주세요" 유효성 에러 메시지 노출',
+      expected: '전송 차단 및 "제목을 입력해주세요" 유효성 에러 메시지 노출',
       codeBasedPrediction: 'NoticeRequestDto @NotBlank(title) 유효성 검사 로직 통과',
     },
   ],
@@ -299,7 +299,7 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
                         명세 기준 기대 결과 (Expected)
                       </span>
                       <p className="text-emerald-900 leading-relaxed text-[11px]">
-                        {activeCase.expectedResult}
+                        {activeCase.expected}
                       </p>
                     </div>
 

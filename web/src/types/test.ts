@@ -3,7 +3,7 @@ export interface TestCaseItem {
   id: string;
   procedure: string;
   inputValue: string;
-  expectedResult: string;
+  expected: string;
   codeBasedPrediction: string;
   actualStatus: string;
   actualResultNote?: string;

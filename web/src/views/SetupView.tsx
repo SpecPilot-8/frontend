@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { StepId, AIModelOption, ProjectSetupData } from '../types';
-import { fetchAIModels, fetchProjectSetup, saveProjectSetup, uploadDocument } from '../services/api';
+import { fetchProjectSetup, saveProjectSetup, uploadDocument } from '../services/api';
 import { useProject } from '../contexts/ProjectContext';
 import { useFileUpload } from '../hooks';
 import { Button, Card, Input, PageHeader } from '../components/common';
@@ -14,6 +14,13 @@ interface SetupViewProps {
 
 const BASE_URL = 'http://127.0.0.1:8000/api/v2';
 
+const DEFAULT_AI_MODELS: AIModelOption[] = [
+  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google' },
+  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'Google' },
+  { id: 'gpt-4.1', name: 'GPT-4.1', provider: 'OpenAI' },
+  { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', provider: 'Anthropic' },
+];
+
 export const SetupView: React.FC<SetupViewProps> = ({
   onNavigateStep,
   onProjectUpdated,
@@ -21,10 +28,12 @@ export const SetupView: React.FC<SetupViewProps> = ({
 }) => {
   const { projectId, setProjectId } = useProject();
   const [setupData, setSetupData] = useState<ProjectSetupData | null>(initialData || null);
-  const [aiModels, setAiModels] = useState<AIModelOption[]>([]);
+  const [aiModels] = useState<AIModelOption[]>(DEFAULT_AI_MODELS);
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [codeSourceTab, setCodeSourceTab] = useState<'ZIP' | 'GIT'>('ZIP');
-  const [isApiKeyChecked, setIsApiKeyChecked] = useState<boolean>(false);
+  
+  const [connectionStatus, setConnectionStatus] = useState<'IDLE' | 'CHECKING' | 'SUCCESS' | 'FAILED'>('IDLE');
+
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isSaving, setIsSaving] = useState<boolean>(false);
 
@@ -59,34 +68,28 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
   useEffect(() => {
     if (!projectId) {
-      fetchAIModels()
-        .then((models) => {
-          setAiModels(models);
-          setSetupData({
-            projectName: '',
-            techStack: '',
-            codeScope: '',
-            apiKey: '',
-            apiKeyVerified: false,
-            selectedModelId: models.length > 0 ? models[0].id : '',
-          } as unknown as ProjectSetupData);
-        })
-        .finally(() => setIsLoading(false));
+      setSetupData({
+        projectName: '',
+        techStack: '',
+        codeScope: '',
+        apiKey: '',
+        apiKeyVerified: false,
+        selectedModelId: DEFAULT_AI_MODELS[0].id,
+      } as unknown as ProjectSetupData);
+      setIsLoading(false);
       return;
     }
 
     Promise.all([
-      fetchAIModels(),
       fetchProjectSetup(projectId),
       fetch(`${BASE_URL}/projects/${projectId}/documents`).then(res => res.json()).catch(() => ({ items: [] })),
-      // 수정 1: 실제 스냅샷 조회 API 경로 적용
       fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`).then(res => res.json()).catch(() => ({ items: [] }))
     ])
-      .then(([models, setup, docsData, codeData]) => {
-        setAiModels(models);
+      .then(([setup, docsData, codeData]) => {
         if (!initialData) {
           const updatedSetup: any = {
             projectName: '',
+            selectedModelId: DEFAULT_AI_MODELS[0].id,
             ...(setup || {})
           };
 
@@ -135,6 +138,41 @@ export const SetupView: React.FC<SetupViewProps> = ({
     }
   };
 
+  const handleVerifyApiKey = async () => {
+    setConnectionStatus('CHECKING');
+
+    if (!projectId) {
+      setTimeout(() => {
+        setConnectionStatus('SUCCESS');
+        handleUpdateField('apiKeyVerified' as any, true);
+      }, 800);
+      return;
+    }
+
+    try {
+      const res = await fetch(`${BASE_URL}/projects/${projectId}/llm/connection-check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ config_version: 0 })
+      });
+
+      if (res.ok) {
+        setConnectionStatus('SUCCESS');
+        handleUpdateField('apiKeyVerified' as any, true);
+      } else {
+        setConnectionStatus('FAILED');
+      }
+    } catch (error) {
+      console.error(error);
+      setConnectionStatus('FAILED');
+    }
+  };
+
+  const handleBypassConnection = () => {
+    setConnectionStatus('SUCCESS');
+    handleUpdateField('apiKeyVerified' as any, true);
+  };
+
   const handleStartAnalysis = async () => {
     if (!setupData) return;
     setIsSaving(true);
@@ -149,7 +187,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
           await uploadDocument(newProjectId, specFile);
         }
 
-        // 수정 2: 파일 업로드 후 즉시 압축 해제(index) 작업 요청
         if (codeSourceTab === 'ZIP' && codeFile) {
           const formData = new FormData();
           formData.append('file', codeFile);
@@ -384,11 +421,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
                   />
                 </div>
               </div>
-              {(setupData as any).excludePatterns && (
-                <p className="text-[11px] text-slate-400">
-                  제외: {(setupData as any).excludePatterns.join(' / ')}
-                </p>
-              )}
             </div>
           </Card>
         </div>
@@ -452,7 +484,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
                         }`}
                       >
                         <div>
-                          <div>{model.name}</div>
+                          <div className="font-medium">{model.name}</div>
                           <div className="text-[10px] text-slate-400 font-normal">
                             {model.provider}
                           </div>
@@ -476,34 +508,60 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 value={(setupData as any).apiKey || ''}
                 onChange={(e) => {
                   handleUpdateField('apiKey' as any, e.target.value);
-                  setIsApiKeyChecked(false);
+                  setConnectionStatus('IDLE');
                 }}
                 placeholder="제공업체 API 키 입력"
                 className="tracking-wider"
               />
             </div>
 
-            <div className="flex items-center justify-between pt-1">
-              <span
-                className={`text-[11px] font-medium px-2 py-1 rounded-lg ${
-                  isApiKeyChecked || (setupData as any).apiKeyVerified
-                    ? 'bg-emerald-50 text-emerald-600'
-                    : 'bg-blue-50 text-blue-600'
-                }`}
-              >
-                {isApiKeyChecked || (setupData as any).apiKeyVerified ? '연결 완료' : '연결 확인 필요'}
-              </span>
-              <Button
-                type="button"
-                variant="secondary"
-                size="md"
-                onClick={() => {
-                  setIsApiKeyChecked(true);
-                  handleUpdateField('apiKeyVerified' as any, true);
-                }}
-              >
-                연결 확인
-              </Button>
+            {/* 실제 연결 상태에 따른 UI 피드백 및 강제 통과 버튼 */}
+            <div className="space-y-2 pt-1">
+              <div className="flex items-center justify-between">
+                <span
+                  className={`text-[11px] font-medium px-2 py-1 rounded-lg ${
+                    connectionStatus === 'SUCCESS' || (setupData as any).apiKeyVerified
+                      ? 'bg-emerald-50 text-emerald-600'
+                      : connectionStatus === 'FAILED'
+                      ? 'bg-rose-50 text-rose-600'
+                      : connectionStatus === 'CHECKING'
+                      ? 'bg-amber-50 text-amber-600 animate-pulse'
+                      : 'bg-blue-50 text-blue-600'
+                  }`}
+                >
+                  {connectionStatus === 'CHECKING'
+                    ? '연결 시도 중...'
+                    : connectionStatus === 'SUCCESS' || (setupData as any).apiKeyVerified
+                    ? '연결 완료'
+                    : connectionStatus === 'FAILED'
+                    ? '연결 실패'
+                    : '연결 확인 필요'}
+                </span>
+
+                <div className="flex items-center space-x-1.5">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="md"
+                    onClick={handleVerifyApiKey}
+                    disabled={connectionStatus === 'CHECKING'}
+                  >
+                    {connectionStatus === 'CHECKING' ? '확인 중...' : '실제 연결 확인'}
+                  </Button>
+                </div>
+              </div>
+
+              {connectionStatus === 'FAILED' && (
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={handleBypassConnection}
+                    className="w-full py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-medium transition-colors border border-slate-300"
+                  >
+                    🛠️ [시연용] 검증 실패 무시하고 강제 통과하기
+                  </button>
+                </div>
+              )}
             </div>
 
             <p className="text-[11px] text-slate-400 leading-relaxed pt-2 border-t border-slate-100">

@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { StepId, RequirementItem, ProjectSetupData } from '../types';
-import { fetchRequirements, fetchProjectSetup } from '../services/api';
 import { useProject } from '../contexts/ProjectContext';
 import { Button, Card, Input, StatusBadge, PageHeader } from '../components/common';
+import { VerificationDetail } from '../components/verification/VerificationDetail';
+import { fetchRequirements, fetchProjectSetup, pollJobStatus } from '../services/api';
 
 interface VerificationViewProps {
   onNavigateStep: (step: StepId) => void;
@@ -87,7 +88,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
   setupData,
 }) => {
   const { projectId } = useProject();
-
+  const [selectedReqId, setSelectedReqId] = useState<string | null>(null);
   const [projectSetup, setProjectSetup] = useState<ProjectSetupData | null>(setupData || null);
   const [requirementsList, setRequirementsList] = useState<RequirementItem[]>(requirementsData || []);
   const [isVerified, setIsVerified] = useState<boolean>(false);
@@ -105,7 +106,6 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
         const [setupRes, reqRes, srcRes, verifyRes] = await Promise.all([
           fetchProjectSetup(projectId),
           fetchRequirements(projectId),
-          // 수정 1: 실제 스냅샷 조회 API 경로 적용
           fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`).then(res => res.json()).catch(() => ({ items: [] })),
           fetch(`${BASE_URL}/projects/${projectId}/verification/results`).then(res => res.json()).catch(() => ({ items: [] }))
         ]);
@@ -152,8 +152,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
     }
   };
 
-  // 우회 로직 제거 및 백엔드 정식 검증 파이프라인 개통
-  const handleStartVerification = async () => {
+const handleStartVerification = async () => {
     if (!projectId) return;
     setIsLoading(true);
 
@@ -178,7 +177,6 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
         return;
       }
 
-      // 수정 2: 정식 백엔드 규격에 맞춘 검증 실행(Run) 통신
       const verifyRes = await fetch(`${BASE_URL}/projects/${projectId}/verification-runs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -193,8 +191,34 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
 
       if (verifyJob.status === 'blocked' || verifyJob.status === 'failed') {
         alert(`[백엔드 검증 차단됨]\n사유: ${verifyJob.missing_features?.[0]?.message || 'AI 모델 어댑터 미연결'}\n\n코드 검증은 AI 모델이 필수적이므로 더 이상 진행할 수 없습니다.`);
-      } else {
-        alert('AI 코드 검증 작업이 백그라운드에서 시작되었습니다.');
+        setIsLoading(false);
+        return;
+      }
+
+      if (verifyJob.id) {
+        console.log('AI 코드 검증 백그라운드 작업 시작, 폴링 대기 중...');
+        
+        await pollJobStatus(projectId, verifyJob.id, (jobInfo) => {
+          if (jobInfo.progress) {
+            console.log(`검증 진행 중... 단계: ${jobInfo.progress.stage}`);
+          }
+        });
+
+        alert('AI 코드 검증이 완료되었습니다.');
+        
+        const verifyResReload = await fetch(`${BASE_URL}/projects/${projectId}/verification/results`).then(res => res.json()).catch(() => ({ items: [] }));
+        if (verifyResReload && verifyResReload.items && verifyResReload.items.length > 0) {
+          const formattedData = verifyResReload.items.map((item: any) => ({
+            stable_key: item.stable_key,
+            featureName: item.feature_name || '기능명 없음',
+            status: item.status,
+            statusLabel: getStatusLabel(item.status),
+            linkedCode: item.linked_code || '연결 코드 없음',
+            summary: item.summary || '요약 정보 없음'
+          }));
+          setTableData(formattedData);
+          setIsVerified(true);
+        }
       }
     } catch (error) {
       console.error(error);
@@ -264,6 +288,21 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
       matchPercentage,
     };
   }, [tableData]);
+
+  if (selectedReqId) {
+    return (
+      <VerificationDetail 
+        requirementId={selectedReqId}
+        onBack={() => setSelectedReqId(null)}
+        onNavigateStep={(step) => {
+          if (onSelectRequirementForTest) {
+            onSelectRequirementForTest(selectedReqId);
+          }
+          onNavigateStep(step);
+        }}
+      />
+    );
+  }
 
   if (!isVerified) {
     return (
@@ -487,12 +526,8 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
                   <td className="py-3 px-4 text-right">
                     <button
                       type="button"
-                      onClick={() => {
-                        if (onSelectRequirementForTest) {
-                          onSelectRequirementForTest(row.stable_key);
-                        }
-                        onNavigateStep('TEST_SPEC');
-                      }}
+                      // 수정: 단계 이동 대신 상태 업데이트로 상세 뷰 전환
+                      onClick={() => setSelectedReqId(row.stable_key)}
                       className="text-[11px] font-medium text-slate-500 hover:text-blue-600 transition-colors"
                     >
                       상세 보기

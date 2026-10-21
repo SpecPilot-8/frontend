@@ -148,3 +148,47 @@ export const fetchVerificationResults = async (): Promise<VerificationResultItem
 export const fetchTestSpecifications = async (_requirementId: string): Promise<TestSpecificationGroup | null> => {
   return null;
 };
+
+/**
+ * 백엔드 비동기 Job이 완료될 때까지 폴링(Polling)하는 함수
+ * @param projectId 프로젝트 ID
+ * @param jobId 작업 ID
+ * @param onProgress 진행 상황 콜백 (선택)
+ * @returns 최종 Job 결과 데이터
+ */
+export async function pollJobStatus(
+  projectId: string, 
+  jobId: string, 
+  onProgress?: (job: any) => void
+): Promise<any> {
+  const maxAttempts = 60; // 최대 60번 시도 (약 1분)
+  let attempts = 0;
+
+  while (attempts < maxAttempts) {
+    try {
+      const res = await fetch(`${BASE_URL}/projects/${projectId}/jobs/${jobId}`);
+      if (!res.ok) {
+        throw new Error('작업 상태를 조회하는 중 오류가 발생했습니다.');
+      }
+      
+      const job = await res.json();
+      
+      if (onProgress) {
+        onProgress(job);
+      }
+
+      // 완료되었거나 차단/실패한 경우 루프 탈출
+      if (job.status === 'completed' || job.status === 'failed' || job.status === 'blocked') {
+        return job;
+      }
+    } catch (error) {
+      console.error('Job 폴링 중 에러:', error);
+    }
+
+    // 1초 대기 후 재시도
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    attempts++;
+  }
+
+  throw new Error('작업 시간이 초과되었습니다. (Timeout)');
+}

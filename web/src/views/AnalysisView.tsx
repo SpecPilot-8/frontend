@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import type { StepId, RequirementItem, Condition } from '../types';
-import { fetchRequirements } from '../services/api';
+import { fetchRequirements, pollJobStatus } from '../services/api';
 import { useProject } from '../contexts/ProjectContext';
 import { Button, Card, Input, StatusBadge, PageHeader } from '../components/common';
 import { VIEW_HEADER } from '../styles/typography';
@@ -15,7 +15,7 @@ const BASE_URL = 'http://127.0.0.1:8000/api/v2';
 
 export const AnalysisView: React.FC<AnalysisViewProps> = ({
   onNavigateStep,
-  specDocumentName = '한성대_specpilot_기획서_v0.2.pdf',
+  specDocumentName = '등록된 기획서 없음',
   specVersion = 'v0.2',
 }) => {
   const { projectId } = useProject();
@@ -24,6 +24,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   const [selectedId, setSelectedId] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  
+  const [pollingMessage, setPollingMessage] = useState<string>('');
 
   const [viewMode, setViewMode] = useState<'VIEW' | 'ADD' | 'EDIT'>('ADD');
 
@@ -39,6 +41,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   const loadData = async (preserveId?: string) => {
     if (!projectId) return;
     setIsLoading(true);
+    setPollingMessage('');
     try {
       const data = await fetchRequirements(projectId);
       setRequirements(data);
@@ -72,41 +75,62 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   const handleStartAIAnalysis = async () => {
     if (!projectId) return;
     setIsLoading(true);
+    setPollingMessage('백엔드에 분석을 요청하는 중입니다...');
+    
     try {
       const docRes = await fetch(`${BASE_URL}/projects/${projectId}/documents`);
       const docData = await docRes.json();
       if (!docData.items || docData.items.length === 0) {
         alert('백엔드에 등록된 기획서 문서가 없습니다. 프로젝트 설정에서 파일을 먼저 업로드하세요.');
         setIsLoading(false);
+        setPollingMessage('');
         return;
       }
       
       const docId = docData.items[0].id;
       const docRev = docData.items[0].revision || 1;
 
+      setPollingMessage('문서 구조를 파싱하고 있습니다...');
       await fetch(`${BASE_URL}/projects/${projectId}/documents/${docId}/parse`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ document_revision: docRev })
       });
 
+      setPollingMessage('AI 모델에 요구사항 추출을 요청했습니다...');
       const extRes = await fetch(`${BASE_URL}/projects/${projectId}/documents/${docId}/requirements/extract`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ document_revision: docRev, model_config_version: 0, accept_warnings: true })
       });
+      
       const extJob = await extRes.json();
 
       if (extJob.status === 'blocked' || extJob.status === 'failed') {
         alert(`[백엔드 분석 차단됨]\n사유: ${extJob.missing_features?.[0]?.message || 'AI 모델 어댑터 미연결'}\n\n자동 분석이 불가능하므로 좌측 폼에서 요구사항을 수동으로 입력해 주세요.`);
-      } else {
-        alert('AI 분석 작업이 백그라운드에서 시작되었습니다.');
+        setIsLoading(false);
+        setPollingMessage('');
+        return;
+      }
+
+      if (extJob.id) {
+        setPollingMessage('AI가 기획서의 의미를 추출하고 있습니다. 잠시만 기다려주세요...');
+        
+        await pollJobStatus(projectId, extJob.id, (jobInfo) => {
+          // 진행 상태 업데이트가 필요하다면 여기서 처리
+          if (jobInfo.progress && jobInfo.progress.stage === 'extracting') {
+            setPollingMessage(`의미 추출 진행 중... (${jobInfo.progress.completed}/${jobInfo.progress.total})`);
+          }
+        });
+        
+        setPollingMessage('분석이 완료되었습니다. 데이터를 불러옵니다...');
         await loadData();
       }
     } catch (error) {
       console.error(error);
       alert('AI 분석 요청 중 통신 오류가 발생했습니다.');
       setIsLoading(false);
+      setPollingMessage('');
     }
   };
 
@@ -154,7 +178,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // 조용히 무시되는 현상을 막기 위해 강력한 경고창 로직 추가
     if (!projectId) {
       alert('선택된 프로젝트가 없습니다. 브라우저를 새로고침하셨다면, 좌측 메뉴에서 프로젝트를 다시 선택한 뒤 진입해 주세요.');
       return;
@@ -273,8 +296,19 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
 
   if (isLoading) {
     return (
-      <div className="max-w-[1180px] mx-auto py-12 text-center text-xs text-slate-400">
-        요구사항 데이터를 불러오고 있습니다...
+      <div className="max-w-[1180px] mx-auto py-12 flex flex-col items-center justify-center space-y-4">
+        {pollingMessage && (
+          <div className="flex items-center space-x-3 text-blue-600 font-semibold bg-blue-50/50 px-4 py-2 rounded-xl animate-pulse">
+            <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            <span>{pollingMessage}</span>
+          </div>
+        )}
+        <div className="text-xs text-slate-400">
+          요구사항 데이터를 불러오고 있습니다...
+        </div>
       </div>
     );
   }

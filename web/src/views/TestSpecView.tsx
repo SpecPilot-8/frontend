@@ -7,7 +7,6 @@ interface TestSpecViewProps {
   onNavigateStep: (step: StepId) => void;
 }
 
-// 목업 데이터 보존
 const mockTestSpecGroup: TestSpecificationGroup = {
   requirementId: 'REQ-NOTICE-002',
   requirementCode: 'NOTICE-002',
@@ -68,6 +67,7 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [latestRun, setLatestRun] = useState<any>(null);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // 목업 UI 상태
   const [specGroup, setSpecGroup] = useState<TestSpecificationGroup | null>(null);
@@ -105,7 +105,6 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
     setIsGenerating(true);
 
     try {
-      // 수정된 부분: requirements 필드 대신 백엔드 명세에 맞춘 requirement_versions 필드를 사용합니다.
       const reqIds = latestRun.requirement_versions 
         ? latestRun.requirement_versions.map((r: any) => r.requirement_id) 
         : [];
@@ -140,6 +139,54 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
     }
   };
 
+  // 백엔드 정식 사양서 엑셀(XLSX) 내보내기 API 연동
+  const handleExportExcel = async () => {
+    if (!projectId) return;
+    setIsExporting(true);
+
+    try {
+      const specRes = await fetch(`${BASE_URL}/projects/${projectId}/test-specifications`);
+      const specData = await specRes.json();
+
+      if (!specData.items || specData.items.length === 0) {
+        alert('출력할 테스트 사양서가 아직 존재하지 않습니다. (생성 작업 필요)');
+        setIsExporting(false);
+        return;
+      }
+
+      const targetSpec = specData.items[0];
+
+      const exportRes = await fetch(`${BASE_URL}/projects/${projectId}/exports/test-specification`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          test_specification_id: targetSpec.id,
+          revision: targetSpec.revision || 1,
+          execution_selection: 'latest_per_case',
+          template_id: 'thinktree-test-spec-v1',
+          include_analysis_detail: false,
+          format: 'xlsx'
+        })
+      });
+
+      const exportJob = await exportRes.json();
+
+      if (exportJob.result_ref && exportJob.result_ref.id) {
+        const artifactId = exportJob.result_ref.id;
+        window.open(`${BASE_URL}/projects/${projectId}/artifacts/${artifactId}/download`, '_blank');
+      } else if (exportJob.error) {
+        alert(`[출력 실패] ${exportJob.error.message || '출력할 데이터가 없습니다.'}`);
+      } else {
+        alert('엑셀 파일 생성 작업이 접수되었습니다.');
+      }
+    } catch (error) {
+      console.error(error);
+      alert('엑셀 파일 내보내기 중 통신 오류가 발생했습니다.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   // 목업 토글 로직
   const handleToggleMock = () => {
     if (!isUsingMock) {
@@ -158,22 +205,6 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
   const activeCase: TestCaseItem | undefined =
     specGroup?.testCases.find((item: TestCaseItem) => item.id === activeCaseId) ||
     specGroup?.testCases[0];
-
-  const handleExport = () => {
-    if (!specGroup) return;
-    const jsonString = `data:text/json;charset=utf-8,${encodeURIComponent(
-      JSON.stringify(specGroup, null, 2)
-    )}`;
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute('href', jsonString);
-    downloadAnchor.setAttribute(
-      'download',
-      `test_spec_${specGroup.requirementCode || specGroup.requirementId}.json`
-    );
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
 
   if (isLoading) {
     return (
@@ -199,8 +230,8 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
               <Button variant="secondary" onClick={() => onNavigateStep('VERIFICATION')}>
                 이전 화면으로
               </Button>
-              <Button variant="primary" onClick={handleExport}>
-                사양서 JSON 내보내기
+              <Button variant="primary" onClick={handleExportExcel} disabled={isExporting}>
+                {isExporting ? '사양서 엑셀 생성 중...' : '사양서 엑셀(XLSX) 내보내기'}
               </Button>
             </div>
           }
@@ -358,6 +389,11 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
         stepTag="04 / TEST SPECIFICATION"
         title="QA 테스트 사양서 명세"
         description="검증된 요구사항을 바탕으로 자동 구성된 테스트 케이스와 검증 절차를 검토합니다."
+        action={
+          <Button variant="primary" onClick={handleExportExcel} disabled={isExporting}>
+            {isExporting ? '사양서 엑셀 생성 중...' : '사양서 엑셀(XLSX) 내보내기'}
+          </Button>
+        }
       />
 
       <Card
@@ -368,7 +404,6 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
         <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-4 space-y-2 text-sm text-slate-700">
           <p><span className="font-semibold text-slate-900">기준 검증 ID:</span> {latestRun.id}</p>
           <p><span className="font-semibold text-slate-900">대상 스냅샷:</span> {latestRun.snapshot_id}</p>
-          {/* 요구사항 개수 표시도 백엔드 명세에 맞추어 requirement_versions로 수정 */}
           <p><span className="font-semibold text-slate-900">포함된 요구사항:</span> {latestRun.requirement_versions?.length || 0}개</p>
         </div>
 

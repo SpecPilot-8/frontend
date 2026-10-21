@@ -25,3 +25,21 @@ export interface VerificationResultItem {
   evidenceList: CodeEvidence[];
   [key: string]: any;
 }
+
+export interface SourceRef {
+  block_id: string;
+  quote: string;
+  location?: {
+    kind: string;
+    index: number;
+    bbox?: number[];
+  };
+}
+
+export interface Requirement {
+  id?: string;
+  stable_key: string;
+  title?: string;
+  original_text: string;
+  source_refs?: SourceRef[];
+}

@@ -1,14 +1,13 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import type { TestSpecificationGroup, TestCaseItem, StepId } from '../types';
-import { fetchTestSpecifications } from '../services/api';
-import { Button, Card, StatusBadge, EmptyState } from '../components/common';
+import { useProject } from '../contexts/ProjectContext';
+import { Button, Card, StatusBadge, EmptyState, PageHeader } from '../components/common';
 
 interface TestSpecViewProps {
   onNavigateStep: (step: StepId) => void;
-  selectedRequirementId?: string;
 }
 
-// 목업 데이터
+// 목업 데이터 보존
 const mockTestSpecGroup: TestSpecificationGroup = {
   requirementId: 'REQ-NOTICE-002',
   requirementCode: 'NOTICE-002',
@@ -58,42 +57,90 @@ const mockTestSpecGroup: TestSpecificationGroup = {
   ],
 };
 
+const BASE_URL = 'http://127.0.0.1:8000/api/v2';
+
 export const TestSpecView: React.FC<TestSpecViewProps> = ({
   onNavigateStep,
-  selectedRequirementId = 'REQ-001',
 }) => {
+  const { projectId } = useProject();
+  
+  // 실제 API 상태
+  const [isLoading, setIsLoading] = useState(true);
+  const [latestRun, setLatestRun] = useState<any>(null);
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  // 목업 UI 상태
   const [specGroup, setSpecGroup] = useState<TestSpecificationGroup | null>(null);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
   const [isUsingMock, setIsUsingMock] = useState<boolean>(false);
 
-  // API 데이터 로드
-  const loadApiData = useCallback(async () => {
-    setIsLoading(true);
+  // 백엔드 데이터 로드
+  useEffect(() => {
+    if (!projectId) return;
+
+    const loadVerificationRun = async () => {
+      try {
+        const runsRes = await fetch(`${BASE_URL}/projects/${projectId}/verification-runs`);
+        const runsData = await runsRes.json();
+
+        if (runsData.items && runsData.items.length > 0) {
+          const runId = runsData.items[0].id;
+          const detailRes = await fetch(`${BASE_URL}/projects/${projectId}/verification-runs/${runId}`);
+          const detailData = await detailRes.json();
+          setLatestRun(detailData);
+        }
+      } catch (error) {
+        console.error('검증 실행 정보 로딩 실패:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    loadVerificationRun();
+  }, [projectId]);
+
+  // AI 테스트 생성 통신 개통
+  const handleGenerateTestSpec = async () => {
+    if (!projectId || !latestRun) return;
+    setIsGenerating(true);
+
     try {
-      const data = await fetchTestSpecifications(selectedRequirementId);
-      if (data && data.testCases && data.testCases.length > 0) {
-        setSpecGroup(data);
-        setActiveCaseId(data.testCases[0].id);
-        setIsUsingMock(false);
+      // 수정된 부분: requirements 필드 대신 백엔드 명세에 맞춘 requirement_versions 필드를 사용합니다.
+      const reqIds = latestRun.requirement_versions 
+        ? latestRun.requirement_versions.map((r: any) => r.requirement_id) 
+        : [];
+      
+      if (reqIds.length === 0) {
+        alert('검증에 사용된 요구사항이 없습니다.');
+        setIsGenerating(false);
+        return;
+      }
+
+      const res = await fetch(`${BASE_URL}/projects/${projectId}/test-specifications/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          verification_run_id: latestRun.id,
+          requirement_ids: reqIds
+        })
+      });
+
+      const job = await res.json();
+
+      if (job.status === 'blocked' || job.status === 'failed') {
+        alert(`[백엔드 테스트 생성 차단됨]\n사유: ${job.missing_features?.[0]?.message || 'AI 모델 어댑터 미연결'}\n\n테스트 생성은 AI 모델이 필수적이므로 더 이상 진행할 수 없습니다.`);
       } else {
-        setSpecGroup(null);
-        setActiveCaseId(null);
+        alert('테스트 사양서 생성 작업이 백그라운드에서 시작되었습니다.');
       }
     } catch (error) {
-      console.warn('API 호출 실패 또는 미구현 (목업으로 전환 가능):', error);
-      setSpecGroup(null);
-      setActiveCaseId(null);
+      console.error(error);
+      alert('테스트 생성 요청 중 통신 오류가 발생했습니다.');
     } finally {
-      setIsLoading(false);
+      setIsGenerating(false);
     }
-  }, [selectedRequirementId]);
+  };
 
-  useEffect(() => {
-    loadApiData();
-  }, [loadApiData]);
-
-  // 목업 토글
+  // 목업 토글 로직
   const handleToggleMock = () => {
     if (!isUsingMock) {
       setSpecGroup(mockTestSpecGroup);
@@ -102,8 +149,9 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
       }
       setIsUsingMock(true);
     } else {
+      setSpecGroup(null);
+      setActiveCaseId(null);
       setIsUsingMock(false);
-      loadApiData();
     }
   };
 
@@ -129,96 +177,49 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
 
   if (isLoading) {
     return (
-      <div className="max-w-6xl mx-auto py-16 px-6 text-center text-xs text-neutral-400">
-        테스트 사양서 데이터를 불러오는 중입니다...
+      <div className="max-w-[1180px] mx-auto py-12 text-center text-xs text-slate-400">
+        검증 데이터를 불러오는 중입니다...
       </div>
     );
   }
 
-  return (
-    <div className="max-w-6xl mx-auto py-8 px-6 space-y-6">
-      {/* 상단 헤더 */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <span className="text-xs font-semibold text-blue-600 block mb-1">
-            04 사양서
-          </span>
-          <div className="flex items-center space-x-2">
-            <h1 className="text-xl font-bold text-neutral-800">
-              QA 테스트 사양서 명세
-            </h1>
-            {isUsingMock && (
-              <span className="text-[10px] bg-blue-100 text-blue-700 font-semibold px-2 py-0.5 rounded">
-                MOCK 데이터 모드
-              </span>
-            )}
-          </div>
-          <p className="mt-1 text-sm text-neutral-500">
-            {specGroup?.groupTitle
-              ? `${specGroup.groupTitle} - 요구사항을 바탕으로 자동 구성된 테스트 케이스를 검토합니다.`
-              : '검증된 요구사항을 바탕으로 자동 구성된 테스트 케이스와 검증 절차를 검토합니다.'}
-          </p>
-        </div>
-
-        <div className="flex items-center space-x-2 flex-wrap">
-          <Button
-            variant="secondary"
-            onClick={handleToggleMock}
-            className="text-xs"
-          >
-            {isUsingMock ? '실제 API 재시도' : '목업 데이터 확인'}
-          </Button>
-
-          <Button variant="secondary" onClick={() => onNavigateStep('VERIFICATION')}>
-            이전 검증 결과
-          </Button>
-          <Button
-            variant="primary"
-            onClick={handleExport}
-            disabled={!specGroup || !specGroup.testCases || specGroup.testCases.length === 0}
-          >
-            사양서 JSON 내보내기
-          </Button>
-        </div>
-      </div>
-
-      {!specGroup || !specGroup.testCases || specGroup.testCases.length === 0 ? (
-        <EmptyState
-          title="생성된 테스트 사양서가 없습니다."
-          description="해당 요구사항에 대한 API 응답이 없거나 테스트 사양서가 아직 생성되지 않았습니다."
+  // 목업 모드일 때의 풍부한 UI 렌더링
+  if (isUsingMock && specGroup) {
+    return (
+      <div className="max-w-[1180px] mx-auto py-2 px-2 md:px-4 space-y-4">
+        <PageHeader
+          stepTag="04 / TEST SPECIFICATION"
+          title="QA 테스트 사양서 명세"
+          description="검증된 요구사항을 바탕으로 자동 구성된 테스트 케이스와 검증 절차를 검토합니다."
           action={
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="primary"
-                size="sm"
-                onClick={handleToggleMock}
-              >
-                목업 화면으로 확인하기
+            <div className="flex items-center space-x-2 flex-wrap">
+              <Button variant="ghost" onClick={handleToggleMock} className="text-blue-600 bg-blue-50">
+                실제 API 모드로 복귀
               </Button>
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={() => onNavigateStep('VERIFICATION')}
-              >
-                검증 결과로 이동
+              <Button variant="secondary" onClick={() => onNavigateStep('VERIFICATION')}>
+                이전 화면으로
+              </Button>
+              <Button variant="primary" onClick={handleExport}>
+                사양서 JSON 내보내기
               </Button>
             </div>
           }
         />
-      ) : (
-        <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+
+        <div className="grid grid-cols-1 md:grid-cols-12 gap-5">
           {/* 사양서 케이스 목록 */}
           <div className="md:col-span-5">
             <Card
               title="테스트 케이스 목록"
               description={`요구사항 [${specGroup.requirementCode || specGroup.requirementId}]에 연결된 케이스`}
+              className="h-full"
               extra={
-                <span className="text-xs text-neutral-400">
+                <span className="text-[11px] text-slate-400">
                   총 {specGroup.totalTests || specGroup.testCases.length}건
                 </span>
               }
             >
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 pr-1 max-h-[600px] overflow-y-auto">
                 {specGroup.testCases.map((item: TestCaseItem) => {
                   const isSelected = activeCase?.id === item.id;
                   return (
@@ -226,20 +227,20 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
                       key={item.id}
                       type="button"
                       onClick={() => setActiveCaseId(item.id)}
-                      className={`w-full text-left p-3 rounded-md border text-xs transition-colors space-y-1 ${
+                      className={`w-full text-left p-3 rounded-xl border text-xs transition-colors space-y-1.5 ${
                         isSelected
-                          ? 'border-blue-500 bg-blue-50/50 text-neutral-900'
-                          : 'border-neutral-200 hover:bg-neutral-50 text-neutral-700'
+                          ? 'border-blue-300 bg-blue-50/60 text-slate-900 shadow-sm'
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700'
                       }`}
                     >
                       <div className="flex items-center justify-between">
-                        <span className="font-semibold text-blue-600">
+                        <span className="font-bold font-mono text-blue-600">
                           {item.testCode}
                         </span>
                         <StatusBadge status={item.status} />
                       </div>
-                      <div className="font-medium truncate">{item.title}</div>
-                      <div className="flex items-center space-x-2 text-[11px] text-neutral-400">
+                      <div className="font-semibold truncate">{item.title}</div>
+                      <div className="flex items-center space-x-2 text-[10px] text-slate-400">
                         <span>유형: {item.testType}</span>
                         <span>·</span>
                         <span>우선순위: {item.priority}</span>
@@ -257,64 +258,60 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
               <Card
                 title={`[${activeCase.testCode}] 상세 절차`}
                 description={activeCase.title}
+                className="h-full"
                 extra={<StatusBadge status={activeCase.status} />}
               >
                 <div className="space-y-4 text-xs">
-                  {/* 사전 조건 */}
                   {specGroup.precondition && (
-                    <div className="p-3 bg-neutral-50 rounded-md border border-neutral-100">
-                      <span className="font-semibold text-neutral-700 block mb-1">
+                    <div className="p-3.5 bg-slate-50/70 rounded-xl border border-slate-200/60">
+                      <span className="font-bold text-slate-800 block mb-1">
                         사전 조건 (Precondition)
                       </span>
-                      <p className="text-neutral-600 leading-relaxed">
+                      <p className="text-slate-600 leading-relaxed">
                         {specGroup.precondition}
                       </p>
                     </div>
                   )}
 
-                  {/* 수행 절차 */}
-                  <div className="p-3 bg-white rounded-md border border-neutral-200 space-y-1">
-                    <span className="font-semibold text-neutral-700 block">
+                  <div className="p-3.5 bg-white rounded-xl border border-slate-200/80 space-y-1.5 shadow-sm">
+                    <span className="font-bold text-slate-800 block">
                       수행 절차 (Procedure)
                     </span>
-                    <p className="text-neutral-600 leading-relaxed whitespace-pre-line">
+                    <p className="text-slate-600 leading-relaxed whitespace-pre-line">
                       {activeCase.procedure}
                     </p>
                   </div>
 
-                  {/* 입력값 / 테스트 데이터 */}
-                  <div className="p-3 bg-white rounded-md border border-neutral-200 space-y-1">
-                    <span className="font-semibold text-neutral-700 block">
+                  <div className="p-3.5 bg-white rounded-xl border border-slate-200/80 space-y-1.5 shadow-sm">
+                    <span className="font-bold text-slate-800 block">
                       입력값 / 테스트 파라미터 (Input Value)
                     </span>
-                    <div className="font-mono text-[11px] text-slate-700 bg-slate-50 p-2 rounded border border-slate-100 break-all">
+                    <div className="font-mono text-[11px] text-slate-700 bg-slate-50 p-2.5 rounded-lg border border-slate-100 break-all">
                       {activeCase.inputValue}
                     </div>
                   </div>
 
-                  {/* 기대 결과 vs 코드 기반 예측 */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="p-3 bg-emerald-50/50 rounded-md border border-emerald-100 space-y-1">
-                      <span className="font-semibold text-emerald-800 block">
+                    <div className="p-3.5 bg-emerald-50/50 rounded-xl border border-emerald-100 space-y-1.5">
+                      <span className="font-bold text-emerald-800 block">
                         명세 기준 기대 결과 (Expected)
                       </span>
-                      <p className="text-emerald-900 leading-relaxed text-[11px]">
+                      <p className="text-emerald-900/90 leading-relaxed text-[11px]">
                         {activeCase.expected}
                       </p>
                     </div>
 
-                    <div className="p-3 bg-blue-50/50 rounded-md border border-blue-100 space-y-1">
-                      <span className="font-semibold text-blue-800 block">
+                    <div className="p-3.5 bg-blue-50/50 rounded-xl border border-blue-100 space-y-1.5">
+                      <span className="font-bold text-blue-800 block">
                         코드 분석 기반 예측 (Prediction)
                       </span>
-                      <p className="text-blue-900 leading-relaxed text-[11px]">
+                      <p className="text-blue-900/90 leading-relaxed text-[11px]">
                         {activeCase.codeBasedPrediction}
                       </p>
                     </div>
                   </div>
 
-                  {/* 하단 메타 정보 */}
-                  <div className="pt-2 border-t border-neutral-100 flex items-center justify-between text-neutral-400 text-[11px]">
+                  <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-slate-400 text-[11px]">
                     <span>연결 요구사항 ID: {specGroup.requirementId}</span>
                     <span>판정: {activeCase.actualStatus || activeCase.status}</span>
                   </div>
@@ -323,7 +320,78 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
             ) : null}
           </div>
         </div>
-      )}
+      </div>
+    );
+  }
+
+  // 검증을 한 번도 안 돌렸을 때의 방어 로직
+  if (!latestRun) {
+    return (
+      <div className="max-w-[1180px] mx-auto py-2 px-2 md:px-4 space-y-4">
+        <PageHeader
+          stepTag="04 / TEST SPECIFICATION"
+          title="테스트 사양서를 생성할 수 없습니다."
+          description="이전 단계에서 코드 검증을 먼저 실행해야 합니다."
+        />
+        <EmptyState
+          title="검증 기록 없음"
+          description="코드 검증을 먼저 실행한 뒤 테스트 사양서를 생성해 주세요."
+          action={
+            <div className="flex items-center space-x-2">
+              <Button variant="primary" onClick={() => onNavigateStep('VERIFICATION')}>
+                검증 화면으로 돌아가기
+              </Button>
+              <Button variant="ghost" onClick={handleToggleMock} className="text-blue-600 bg-blue-50">
+                목업 데이터 확인
+              </Button>
+            </div>
+          }
+        />
+      </div>
+    );
+  }
+
+  // 실제 API 연동 화면 (AI 생성 요청 화면)
+  return (
+    <div className="max-w-[1180px] mx-auto py-2 px-2 md:px-4 space-y-4">
+      <PageHeader
+        stepTag="04 / TEST SPECIFICATION"
+        title="QA 테스트 사양서 명세"
+        description="검증된 요구사항을 바탕으로 자동 구성된 테스트 케이스와 검증 절차를 검토합니다."
+      />
+
+      <Card
+        title="테스트 사양서 자동 생성"
+        description="가장 최근에 실행한 코드 검증 결과를 바탕으로 테스트 케이스를 추출합니다."
+        className="space-y-4"
+      >
+        <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-4 space-y-2 text-sm text-slate-700">
+          <p><span className="font-semibold text-slate-900">기준 검증 ID:</span> {latestRun.id}</p>
+          <p><span className="font-semibold text-slate-900">대상 스냅샷:</span> {latestRun.snapshot_id}</p>
+          {/* 요구사항 개수 표시도 백엔드 명세에 맞추어 requirement_versions로 수정 */}
+          <p><span className="font-semibold text-slate-900">포함된 요구사항:</span> {latestRun.requirement_versions?.length || 0}개</p>
+        </div>
+
+        <div className="pt-2 flex items-center justify-between border-t border-slate-100">
+          <div className="flex items-center space-x-2">
+            <Button variant="secondary" onClick={() => onNavigateStep('VERIFICATION')}>
+              이전 화면으로
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleGenerateTestSpec}
+              disabled={isGenerating}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              {isGenerating ? 'AI 테스트 생성 요청 중...' : 'AI 테스트 사양서 생성 (자동 도출)'}
+            </Button>
+          </div>
+          
+          <Button variant="ghost" onClick={handleToggleMock} className="text-blue-600 bg-blue-50">
+            목업 결과 화면 확인
+          </Button>
+        </div>
+      </Card>
     </div>
   );
 };

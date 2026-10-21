@@ -36,7 +36,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   const [formAction, setFormAction] = useState('');
   const [formExpected, setFormExpected] = useState('');
 
-  // 데이터 새로고침 및 선택된 ID 유지 로직 통합
   const loadData = async (preserveId?: string) => {
     if (!projectId) return;
     setIsLoading(true);
@@ -152,10 +151,19 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     setViewMode('ADD');
   };
 
-  // 수정 요청 시 금지된 필드(original_text)를 제외하고 안전한 데이터만 전송하도록 수정
   const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formTitle.trim() || !projectId) return;
+    
+    // 조용히 무시되는 현상을 막기 위해 강력한 경고창 로직 추가
+    if (!projectId) {
+      alert('선택된 프로젝트가 없습니다. 브라우저를 새로고침하셨다면, 좌측 메뉴에서 프로젝트를 다시 선택한 뒤 진입해 주세요.');
+      return;
+    }
+    if (!formTitle.trim()) {
+      alert('기능 이름을 필수로 입력해 주세요.');
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -182,7 +190,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           throw new Error(errData.error?.message || '수정 요청이 거절되었습니다.');
         }
 
-        await loadData(selectedReq.id); // 수정한 항목 포커스 유지
+        await loadData(selectedReq.id);
       } else {
         if (!docId) throw new Error("업로드된 기획서가 없습니다.");
         
@@ -219,7 +227,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
         }
 
         const newData = await postRes.json();
-        await loadData(newData.id); // 새로 추가한 항목 포커스 유지
+        await loadData(newData.id);
       }
     } catch (error: any) {
       console.error(error);
@@ -246,7 +254,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
         throw new Error('검토 확정에 실패했습니다.');
       }
 
-      await loadData(selectedReq.id); // 확정 항목 포커스 유지
+      await loadData(selectedReq.id);
     } catch (error) {
       console.error(error);
       alert('요구사항 확정 처리 중 오류가 발생했습니다.');

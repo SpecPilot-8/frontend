@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import type { StepId, AIModelOption, ProjectSetupData } from '../types';
-import { fetchAIModels, fetchProjectSetup, saveProjectSetup, uploadDocument, uploadSourceCode } from '../services/api';
+import { fetchAIModels, fetchProjectSetup, saveProjectSetup, uploadDocument } from '../services/api';
 import { useProject } from '../contexts/ProjectContext';
 import { useFileUpload } from '../hooks';
 import { Button, Card, Input, PageHeader } from '../components/common';
@@ -11,6 +11,8 @@ interface SetupViewProps {
   onProjectUpdated?: (projectName: string) => void;
   initialData?: ProjectSetupData;
 }
+
+const BASE_URL = 'http://127.0.0.1:8000/api/v2';
 
 export const SetupView: React.FC<SetupViewProps> = ({
   onNavigateStep,
@@ -34,7 +36,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     onFileSelect: (selectedFile) => {
       setSpecFile(selectedFile);
       const ext = selectedFile.name.split('.').pop() || 'pdf';
-      handleUpdateField('specDocument', {
+      handleUpdateField('specDocument' as any, {
         name: selectedFile.name,
         format: ext,
         pages: 1,
@@ -47,7 +49,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     accept: '.zip',
     onFileSelect: (selectedFile) => {
       setCodeFile(selectedFile);
-      handleUpdateField('sourceCode', {
+      handleUpdateField('sourceCode' as any, {
         name: selectedFile.name,
         fileCount: 0,
         snapshotId: 'UPLOAD-' + Date.now().toString().slice(-4),
@@ -67,17 +69,47 @@ export const SetupView: React.FC<SetupViewProps> = ({
             apiKey: '',
             apiKeyVerified: false,
             selectedModelId: models.length > 0 ? models[0].id : '',
-          } as any);
+          } as unknown as ProjectSetupData);
         })
         .finally(() => setIsLoading(false));
       return;
     }
 
-    Promise.all([fetchAIModels(), fetchProjectSetup(projectId)])
-      .then(([models, setup]) => {
+    Promise.all([
+      fetchAIModels(),
+      fetchProjectSetup(projectId),
+      fetch(`${BASE_URL}/projects/${projectId}/documents`).then(res => res.json()).catch(() => ({ items: [] })),
+      // 수정 1: 실제 스냅샷 조회 API 경로 적용
+      fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`).then(res => res.json()).catch(() => ({ items: [] }))
+    ])
+      .then(([models, setup, docsData, codeData]) => {
         setAiModels(models);
         if (!initialData) {
-          setSetupData(setup);
+          const updatedSetup: any = {
+            projectName: '',
+            ...(setup || {})
+          };
+
+          if (docsData.items && docsData.items.length > 0) {
+            const doc = docsData.items[0];
+            updatedSetup.specDocument = {
+              name: doc.name || '기존_업로드된_기획서.pdf',
+              format: 'pdf',
+              pages: 1,
+              version: `v${doc.revision || 1}.0`
+            };
+          }
+
+          if (codeData.items && codeData.items.length > 0) {
+            const snap = codeData.items[0];
+            updatedSetup.sourceCode = {
+              name: '기존_업로드된_소스코드.zip',
+              fileCount: snap.file_count || 0,
+              snapshotId: snap.id
+            };
+          }
+
+          setSetupData(updatedSetup as unknown as ProjectSetupData);
         }
       })
       .catch((err) => {
@@ -113,12 +145,30 @@ export const SetupView: React.FC<SetupViewProps> = ({
       if (response.success && response.projectId) {
         const newProjectId = response.projectId;
 
-        // 화면 초기화를 막기 위해 파일을 모두 전송한 뒤에 setProjectId를 호출합니다.
         if (specFile) {
           await uploadDocument(newProjectId, specFile);
         }
+
+        // 수정 2: 파일 업로드 후 즉시 압축 해제(index) 작업 요청
         if (codeSourceTab === 'ZIP' && codeFile) {
-          await uploadSourceCode(newProjectId, codeFile);
+          const formData = new FormData();
+          formData.append('file', codeFile);
+          
+          const sourceRes = await fetch(`${BASE_URL}/projects/${newProjectId}/code/sources`, {
+            method: 'POST',
+            body: formData,
+          });
+          
+          if (sourceRes.ok) {
+            const sourceData = await sourceRes.json();
+            if (sourceData.source_id) {
+              await fetch(`${BASE_URL}/projects/${newProjectId}/code/index`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ source_id: sourceData.source_id })
+              });
+            }
+          }
         }
 
         setProjectId(newProjectId);
@@ -128,7 +178,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       }
     } catch (error: any) {
       console.error(error);
-      alert(`파일 업로드 오류: ${error.message}`);
+      alert(`파일 처리 오류: ${error.message}`);
     } finally {
       setIsSaving(false);
     }
@@ -142,8 +192,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
     );
   }
 
-  const isSpecUploaded = !!setupData.specDocument?.name;
-  const isSourceUploaded = !!setupData.sourceCode?.name;
+  const isSpecUploaded = !!(setupData as any).specDocument?.name;
+  const isSourceUploaded = !!(setupData as any).sourceCode?.name;
 
   return (
     <div className="max-w-[1080px] mx-auto py-2 px-2 md:px-4 space-y-5">
@@ -203,10 +253,10 @@ export const SetupView: React.FC<SetupViewProps> = ({
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex items-center justify-between">
                     <div>
                       <div className="text-xs font-medium text-slate-800">
-                        {setupData.specDocument?.name}
+                        {(setupData as any).specDocument?.name}
                       </div>
                       <div className="text-[11px] text-slate-400 mt-0.5">
-                        {setupData.specDocument?.format?.toUpperCase()} · {setupData.specDocument?.pages ?? 1}페이지 · {setupData.specDocument?.version ?? 'v1.0'}
+                        {(setupData as any).specDocument?.format?.toUpperCase()} · {(setupData as any).specDocument?.pages ?? 1}페이지 · {(setupData as any).specDocument?.version ?? 'v1.0'}
                       </div>
                     </div>
                     <Button
@@ -272,10 +322,10 @@ export const SetupView: React.FC<SetupViewProps> = ({
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 mt-2 flex items-center justify-between">
                       <div>
                         <div className="text-xs font-medium text-slate-800">
-                          {setupData.sourceCode?.name}
+                          {(setupData as any).sourceCode?.name}
                         </div>
                         <div className="text-[11px] text-slate-400 mt-0.5">
-                          {setupData.sourceCode?.fileCount ? `${setupData.sourceCode.fileCount}개 파일 · ` : ''}코드 스냅샷 {setupData.sourceCode?.snapshotId}
+                          {(setupData as any).sourceCode?.fileCount ? `${(setupData as any).sourceCode.fileCount}개 파일 · ` : ''}코드 스냅샷 {(setupData as any).sourceCode?.snapshotId}
                         </div>
                       </div>
                       <Button
@@ -319,8 +369,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
                   <label className={VIEW_HEADER.fieldLabel}>분석 기술 스택</label>
                   <Input
                     type="text"
-                    value={setupData.techStack || ''}
-                    onChange={(e) => handleUpdateField('techStack', e.target.value)}
+                    value={(setupData as any).techStack || ''}
+                    onChange={(e) => handleUpdateField('techStack' as any, e.target.value)}
                     placeholder="예: Java · Spring Boot"
                   />
                 </div>
@@ -328,15 +378,15 @@ export const SetupView: React.FC<SetupViewProps> = ({
                   <label className={VIEW_HEADER.fieldLabel}>코드 분석 범위</label>
                   <Input
                     type="text"
-                    value={setupData.codeScope || ''}
-                    onChange={(e) => handleUpdateField('codeScope', e.target.value)}
+                    value={(setupData as any).codeScope || ''}
+                    onChange={(e) => handleUpdateField('codeScope' as any, e.target.value)}
                     placeholder="예: src/main/java"
                   />
                 </div>
               </div>
-              {setupData.excludePatterns && (
+              {(setupData as any).excludePatterns && (
                 <p className="text-[11px] text-slate-400">
-                  제외: {setupData.excludePatterns.join(' / ')}
+                  제외: {(setupData as any).excludePatterns.join(' / ')}
                 </p>
               )}
             </div>
@@ -386,13 +436,13 @@ export const SetupView: React.FC<SetupViewProps> = ({
                     분석 모델 선택 · 한 번에 1개
                   </div>
                   {aiModels.map((model) => {
-                    const isSelected = (setupData.selectedModelId || currentModel?.id) === model.id;
+                    const isSelected = ((setupData as any).selectedModelId || currentModel?.id) === model.id;
                     return (
                       <button
                         key={model.id}
                         type="button"
                         onClick={() => {
-                          handleUpdateField('selectedModelId', model.id);
+                          handleUpdateField('selectedModelId' as any, model.id);
                           setIsDropdownOpen(false);
                         }}
                         className={`w-full px-3 py-2 text-left rounded-lg text-xs flex items-center justify-between transition-colors ${
@@ -423,9 +473,9 @@ export const SetupView: React.FC<SetupViewProps> = ({
               <label className={VIEW_HEADER.fieldLabel}>API 키</label>
               <Input
                 type="password"
-                value={setupData.apiKey || ''}
+                value={(setupData as any).apiKey || ''}
                 onChange={(e) => {
-                  handleUpdateField('apiKey', e.target.value);
+                  handleUpdateField('apiKey' as any, e.target.value);
                   setIsApiKeyChecked(false);
                 }}
                 placeholder="제공업체 API 키 입력"
@@ -436,12 +486,12 @@ export const SetupView: React.FC<SetupViewProps> = ({
             <div className="flex items-center justify-between pt-1">
               <span
                 className={`text-[11px] font-medium px-2 py-1 rounded-lg ${
-                  isApiKeyChecked || setupData.apiKeyVerified
+                  isApiKeyChecked || (setupData as any).apiKeyVerified
                     ? 'bg-emerald-50 text-emerald-600'
                     : 'bg-blue-50 text-blue-600'
                 }`}
               >
-                {isApiKeyChecked || setupData.apiKeyVerified ? '연결 완료' : '연결 확인 필요'}
+                {isApiKeyChecked || (setupData as any).apiKeyVerified ? '연결 완료' : '연결 확인 필요'}
               </span>
               <Button
                 type="button"
@@ -449,7 +499,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 size="md"
                 onClick={() => {
                   setIsApiKeyChecked(true);
-                  handleUpdateField('apiKeyVerified', true);
+                  handleUpdateField('apiKeyVerified' as any, true);
                 }}
               >
                 연결 확인

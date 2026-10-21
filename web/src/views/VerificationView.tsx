@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import type { StepId, RequirementItem, ProjectSetupData } from '../types';
-import { fetchVerificationResults, fetchRequirements, fetchProjectSetup } from '../services/api';
+import { fetchRequirements, fetchProjectSetup } from '../services/api';
 import { useProject } from '../contexts/ProjectContext';
 import { Button, Card, Input, StatusBadge, PageHeader } from '../components/common';
 
@@ -12,11 +12,11 @@ interface VerificationViewProps {
 }
 
 export type VerificationStatus =
-  | 'IMPLEMENTED'     // 구현
-  | 'PARTIAL'         // 부분구현
-  | 'MISMATCHED'      // 불일치
-  | 'UNIMPLEMENTED'   // 미구현 후보
-  | 'NEED_CHECK';     // 확인 필요
+  | 'IMPLEMENTED'
+  | 'PARTIAL'
+  | 'MISMATCHED'
+  | 'UNIMPLEMENTED'
+  | 'NEED_CHECK';
 
 export interface TraceabilityRow {
   stable_key: string;
@@ -27,7 +27,6 @@ export interface TraceabilityRow {
   summary: string;
 }
 
-// 개발/목업용 추적표 데이터
 const mockTraceabilityRows: TraceabilityRow[] = [
   {
     stable_key: 'NOTICE-001',
@@ -79,13 +78,14 @@ const mockTraceabilityRows: TraceabilityRow[] = [
   },
 ];
 
+const BASE_URL = 'http://127.0.0.1:8000/api/v2';
+
 export const VerificationView: React.FC<VerificationViewProps> = ({
   onNavigateStep,
   onSelectRequirementForTest,
   requirementsData,
   setupData,
 }) => {
-  // 🚀 전역 보관소에서 projectId 꺼내기
   const { projectId } = useProject();
 
   const [projectSetup, setProjectSetup] = useState<ProjectSetupData | null>(setupData || null);
@@ -95,61 +95,114 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('ALL');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [sourceData, setSourceData] = useState<any>(null);
 
   useEffect(() => {
-    const promises: Promise<unknown>[] = [];
+    if (!projectId) return;
 
-    if (!projectSetup) {
-      promises.push(
-        fetchProjectSetup().then((res) => {
-          if (res) setProjectSetup(res);
-        }).catch(() => {})
-      );
-    }
+    const forceLoadData = async () => {
+      try {
+        const [setupRes, reqRes, srcRes, verifyRes] = await Promise.all([
+          fetchProjectSetup(projectId),
+          fetchRequirements(projectId),
+          // 수정 1: 실제 스냅샷 조회 API 경로 적용
+          fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`).then(res => res.json()).catch(() => ({ items: [] })),
+          fetch(`${BASE_URL}/projects/${projectId}/verification/results`).then(res => res.json()).catch(() => ({ items: [] }))
+        ]);
 
-    // projectId가 존재할 때만 fetchRequirements에 인자로 넘겨 호출
-    if (requirementsList.length === 0 && projectId) {
-      promises.push(
-        fetchRequirements(projectId).then((res) => {
-          if (res) setRequirementsList(res);
-        }).catch(() => {})
-      );
-    }
+        if (setupRes) setProjectSetup(setupRes);
+        if (reqRes) setRequirementsList(reqRes);
+        
+        if (srcRes && srcRes.items && srcRes.items.length > 0) {
+          setSourceData(srcRes.items[0]);
+        } else {
+          setSourceData(null);
+        }
 
-    Promise.all(promises).then(() => {
-      fetchVerificationResults()
-        .then((data) => {
-          if (data && data.length > 0) {
-            setTableData(mockTraceabilityRows);
-            setIsVerified(true);
-          } else {
-            setIsVerified(false);
-          }
-        })
-        .catch(() => {
+        if (verifyRes && verifyRes.items && verifyRes.items.length > 0) {
+          const formattedData = verifyRes.items.map((item: any) => ({
+            stable_key: item.stable_key,
+            featureName: item.feature_name || '기능명 없음',
+            status: item.status,
+            statusLabel: getStatusLabel(item.status),
+            linkedCode: item.linked_code || '연결 코드 없음',
+            summary: item.summary || '요약 정보 없음'
+          }));
+          setTableData(formattedData);
+          setIsVerified(true);
+        } else {
           setIsVerified(false);
-        });
-    });
-  }, [projectSetup, requirementsList.length, projectId]);
+        }
+      } catch (error) {
+        console.error('검증 초기 데이터 강제 로딩 에러:', error);
+      }
+    };
 
-  const confirmedRequirementsCount = useMemo(() => {
-    return requirementsList.filter(
-      (r) => r.review_status === 'approved'
-    ).length;
-  }, [requirementsList]);
+    forceLoadData();
+  }, [projectId]);
 
-  const requirementStatusText = confirmedRequirementsCount > 0 ? '검토 완료' : '검토 필요';
-  const requirementCountText = `확정 ${confirmedRequirementsCount || requirementsList.length}개`;
+  const getStatusLabel = (status: string) => {
+    switch (status) {
+      case 'IMPLEMENTED': return '구현';
+      case 'PARTIAL': return '부분구현';
+      case 'MISMATCHED': return '불일치';
+      case 'UNIMPLEMENTED': return '미구현 후보';
+      case 'NEED_CHECK': return '확인 필요';
+      default: return '상태 불명';
+    }
+  };
 
-  const sourceSnapshotId = projectSetup?.sourceCode?.snapshotId || '스냅샷 미지정';
-  const isSourceConnected = !!projectSetup?.sourceCode?.name;
-  const sourceStatusText = isSourceConnected ? '연결됨' : '미연결';
+  // 우회 로직 제거 및 백엔드 정식 검증 파이프라인 개통
+  const handleStartVerification = async () => {
+    if (!projectId) return;
+    setIsLoading(true);
 
-  const verificationRunStatus = isVerified ? '실행 완료' : '미실행';
-  const verificationAnalysisStatus = isVerified ? '분석 완료' : '미분석';
+    try {
+      const directCodeRes = await fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`);
+      const directCodeData = await directCodeRes.json();
+      
+      if (!directCodeData.items || directCodeData.items.length === 0) {
+        alert('백엔드에 등록된 소스코드 스냅샷이 없습니다.\n1. 좌측 메뉴 [01 프로젝트 설정]으로 이동\n2. ZIP 파일 선택\n3. 화면 맨 아래 [명세 분석 시작]을 눌러 스냅샷을 생성해 주세요.');
+        setIsLoading(false);
+        return;
+      }
 
-  const specVersionLabel = projectSetup?.specDocument?.version || 'v0.2';
-  const snapshotLabel = projectSetup?.sourceCode?.snapshotId || 'S-014';
+      const snapshotId = directCodeData.items[0].id;
+      setSourceData(directCodeData.items[0]);
+
+      const reqsToVerify = requirementsList.filter(r => r.review_status === 'approved');
+
+      if (reqsToVerify.length === 0) {
+        alert('검토 확정(approved)된 요구사항이 한 건도 없습니다. 이전 화면에서 요구사항을 먼저 확정해 주세요.');
+        setIsLoading(false);
+        return;
+      }
+
+      // 수정 2: 정식 백엔드 규격에 맞춘 검증 실행(Run) 통신
+      const verifyRes = await fetch(`${BASE_URL}/projects/${projectId}/verification-runs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          snapshot_id: snapshotId,
+          requirement_versions: reqsToVerify.map(r => ({ requirement_id: r.id, revision: (r as any).revision || 1 })),
+          model_config_version: 0
+        })
+      });
+
+      const verifyJob = await verifyRes.json();
+
+      if (verifyJob.status === 'blocked' || verifyJob.status === 'failed') {
+        alert(`[백엔드 검증 차단됨]\n사유: ${verifyJob.missing_features?.[0]?.message || 'AI 모델 어댑터 미연결'}\n\n코드 검증은 AI 모델이 필수적이므로 더 이상 진행할 수 없습니다.`);
+      } else {
+        alert('AI 코드 검증 작업이 백그라운드에서 시작되었습니다.');
+      }
+    } catch (error) {
+      console.error(error);
+      alert('검증 요청 중 통신 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const handleToggleMockView = () => {
     if (!isVerified) {
@@ -160,6 +213,25 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
       setIsVerified(false);
     }
   };
+
+  const confirmedRequirementsCount = useMemo(() => {
+    return requirementsList.filter(
+      (r) => r.review_status === 'approved'
+    ).length;
+  }, [requirementsList]);
+
+  const requirementStatusText = confirmedRequirementsCount > 0 ? '검토 완료' : '검토 필요';
+  const requirementCountText = `확정 ${confirmedRequirementsCount || requirementsList.length}개`;
+
+  const isSourceConnected = !!sourceData?.id;
+  const sourceSnapshotId = sourceData?.id || '스냅샷 미지정';
+  const sourceStatusText = isSourceConnected ? '연결됨' : '보류';
+
+  const verificationRunStatus = isVerified ? '실행 완료' : '미실행';
+  const verificationAnalysisStatus = isVerified ? '분석 완료' : '미분석';
+
+  const specVersionLabel = projectSetup?.specDocument?.version || 'v0.2';
+  const snapshotLabel = sourceData?.id || 'S-014';
 
   const filteredData = useMemo(() => {
     return tableData.filter((row) => {
@@ -193,7 +265,6 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
     };
   }, [tableData]);
 
-  // 검증 전 화면
   if (!isVerified) {
     return (
       <div className="max-w-[1180px] mx-auto py-2 px-2 md:px-4 space-y-4">
@@ -228,7 +299,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
 
             <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-4 space-y-1.5">
               <span className="text-xs font-bold text-slate-800">소스코드</span>
-              <div className="text-xs text-slate-600">{sourceSnapshotId}</div>
+              <div className="text-xs text-slate-600 truncate">{sourceSnapshotId}</div>
               <div className="pt-1">
                 <StatusBadge status={sourceStatusText === '연결됨' ? '완료' : '보류'} />
               </div>
@@ -269,18 +340,12 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
               </Button>
               <Button
                 type="button"
-                variant="secondary"
+                variant="primary"
                 size="md"
-                onClick={() => {
-                  setIsLoading(true);
-                  setTimeout(() => {
-                    setTableData(mockTraceabilityRows);
-                    setIsVerified(true);
-                    setIsLoading(false);
-                  }, 400);
-                }}
+                className="bg-blue-600 text-white"
+                onClick={handleStartVerification}
               >
-                {isLoading ? '검증 분석 중...' : '다시 검증'}
+                {isLoading ? '검증 분석 중...' : '다시 검증 (AI 요청)'}
               </Button>
             </div>
 
@@ -299,7 +364,6 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
     );
   }
 
-  // 검증 완료 화면
   return (
     <div className="max-w-[1180px] mx-auto py-2 px-2 md:px-4 space-y-4">
       <PageHeader
@@ -324,7 +388,6 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
         }
       />
 
-      {/* 5종 통계 카드 */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
           <div className="text-[11px] text-slate-500">구현</div>
@@ -357,7 +420,6 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
         </div>
       </div>
 
-      {/* 요구사항 추적표 */}
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
@@ -475,15 +537,9 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
             type="button"
             variant="secondary"
             size="md"
-            onClick={() => {
-              setIsLoading(true);
-              setTimeout(() => {
-                setTableData(mockTraceabilityRows);
-                setIsLoading(false);
-              }, 300);
-            }}
+            onClick={handleStartVerification}
           >
-            다시 검증
+            다시 검증 (AI 요청)
           </Button>
         </div>
       </div>

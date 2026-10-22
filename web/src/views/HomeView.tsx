@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { RecentProject, StepId } from '../types';
-import { fetchRecentProjects } from '../services/api';
-import { useProject } from '../contexts/ProjectContext'; // 전역 보관소 불러오기
+import { fetchRecentProjects, BASE_URL } from '../services/api';
+import { useProject } from '../contexts/ProjectContext';
 import { Button, Card, StatusBadge, EmptyState } from '../components/common';
 
 interface HomeViewProps {
@@ -13,36 +13,57 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onSelectProject,
   onNavigateStep,
 }) => {
-  // 전역 보관소에서 setProjectId 함수 꺼내기
   const { setProjectId } = useProject();
 
   const [projects, setProjects] = useState<RecentProject[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  useEffect(() => {
+  const loadProjects = () => {
     fetchRecentProjects()
-      .then((data) => setProjects(data))
+      .then((data) => {
+        setProjects([...data].reverse());
+      })
       .catch((error) => console.error('Failed to load recent projects:', error))
       .finally(() => setIsLoading(false));
+  };
+
+  useEffect(() => {
+    loadProjects();
   }, []);
 
-  // '새 프로젝트 설정 시작' 또는 '새 프로젝트 추가' 버튼 클릭 시
   const handleStartNewSetup = () => {
-    // 새 프로젝트를 만들 때는 아직 확정된 ID가 없으므로 보관소를 비워줍니다.
     setProjectId(null);
     onNavigateStep('SETUP');
   };
 
-  // 목록에서 기존 프로젝트 '열기' 버튼 클릭 시
   const handleOpenProject = (id: string) => {
-    // 전역 보관소에 선택한 프로젝트의 ID를 저장합니다.
     setProjectId(id);
     onSelectProject(id);
   };
 
+  // 서버에 실제 삭제(DELETE) 요청 보내기
+  const handleDeleteProject = async (id: string) => {
+    if (window.confirm("이 프로젝트를 완전히 삭제하시겠습니까?")) {
+      setProjects((prev) => prev.filter((p) => String(p.id) !== id));
+
+      try {
+        const res = await fetch(`${BASE_URL}/projects/${id}`, {
+          method: 'DELETE',
+        });
+
+        if (!res.ok) {
+          throw new Error('서버 삭제 실패');
+        }
+      } catch (error) {
+        console.error('프로젝트 삭제 오류:', error);
+        alert('삭제에 실패했습니다. 서버 연결 상태를 확인해주세요.');
+        loadProjects();
+      }
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto py-8 px-6 space-y-6">
-      {/* 상단 환영 및 서비스 소개 배너 */}
       <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <span className="text-xs font-semibold text-blue-600 block mb-1">
@@ -64,7 +85,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </Button>
       </div>
 
-      {/* 최근 프로젝트 목록 섹션 */}
       <Card
         title="최근 프로젝트"
         description="이전에 분석 및 검증을 진행했던 프로젝트 목록입니다."
@@ -93,33 +113,48 @@ export const HomeView: React.FC<HomeViewProps> = ({
             }
           />
         ) : (
-          <div className="divide-y divide-neutral-100">
+          <div className="divide-y divide-neutral-100 max-h-[360px] overflow-y-auto pr-2 custom-scrollbar">
             {projects.map((project) => (
               <div
-                key={project.id}
+                key={String(project.id)}
                 className="py-3.5 flex items-center justify-between hover:bg-neutral-50/70 px-2 rounded-md transition-colors"
               >
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
                     <span className="text-sm font-semibold text-neutral-800">
-                      {project.name}
+                      {String(project.name || '제목 없음')}
                     </span>
-                    <StatusBadge status={project.verificationStatus} />
+                    {typeof project.verificationStatus === 'string' &&
+                    project.verificationStatus !== 'not_run' &&
+                    project.verificationStatus !== '' ? (
+                      <StatusBadge status={project.verificationStatus} />
+                    ) : null}
                   </div>
-                  <div className="flex items-center space-x-2 text-xs text-neutral-400">
-                    <span>{project.techStack}</span>
-                    <span>·</span>
-                    <span>마지막 작업: {project.lastOpened}</span>
-                  </div>
+                  
+                  {project.techStack || project.lastOpened ? (
+                    <div className="flex items-center space-x-2 text-xs text-neutral-400">
+                      {project.techStack ? <span>{String(project.techStack)}</span> : null}
+                      {project.techStack && project.lastOpened ? <span>·</span> : null}
+                      {project.lastOpened ? <span>마지막 작업: {String(project.lastOpened)}</span> : null}
+                    </div>
+                  ) : null}
                 </div>
 
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => handleOpenProject(project.id)}
-                >
-                  열기
-                </Button>
+                <div className="flex items-center space-x-1.5">
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => handleOpenProject(String(project.id))}
+                  >
+                    열기
+                  </Button>
+                  <button
+                    onClick={() => handleDeleteProject(String(project.id))}
+                    className="px-3 py-1.5 text-xs font-medium text-red-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors border border-transparent hover:border-red-100"
+                  >
+                    삭제
+                  </button>
+                </div>
               </div>
             ))}
           </div>

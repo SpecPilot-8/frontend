@@ -68,6 +68,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
   );
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [savingMessage, setSavingMessage] = useState<string>("");
+  const [isUploaded, setIsUploaded] = useState<boolean>(false);
 
   const [specFile, setSpecFile] = useState<File | null>(null);
   const [codeFile, setCodeFile] = useState<File | null>(null);
@@ -82,11 +83,11 @@ export const SetupView: React.FC<SetupViewProps> = ({
               id: String(m.id || m.model_id || ""),
               name: String(m.name || m.model_name || m.id || ""),
               provider: String(m.provider || "Unknown"),
-            })),
+            }))
           );
         }
       })
-      .catch((err) => console.error("모델 목록 로딩 에러 (기본값 사용):", err));
+      .catch((err) => console.error(err));
   }, []);
 
   const {
@@ -161,6 +162,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
               pageCount: 1,
               version: `v${doc.revision || 1}.0`,
             };
+            setIsUploaded(true);
           }
 
           if (codeData.items && codeData.items.length > 0) {
@@ -177,7 +179,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
         }
       })
       .catch((err) => {
-        console.error("설정 데이터 로드 실패:", err);
+        console.error(err);
       })
       .finally(() => {
         setIsLoading(false);
@@ -213,48 +215,17 @@ export const SetupView: React.FC<SetupViewProps> = ({
     });
   };
 
-  const handleVerifyApiKey = async () => {
-    if (!projectId) {
-      alert(
-        "프로젝트를 먼저 생성해야 AI 모델 연결을 확인할 수 있습니다. 하단의 [명세 분석 시작]을 눌러 프로젝트를 저장하세요.",
-      );
+  const handleSaveAndUpload = async () => {
+    if (!setupData || !setupData.projectName.trim()) {
+      alert("프로젝트 이름을 입력해주세요.");
       return;
     }
 
-    setConnectionStatus("CHECKING");
-
-    try {
-      const res = await fetch(
-        `${BASE_URL}/projects/${projectId}/llm/connection-check`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ config_version: 0 }),
-        },
-      );
-
-      if (res.ok) {
-        setConnectionStatus("SUCCESS");
-        handleUpdateAiConfig("isConnected", true);
-      } else {
-        const errorData = await res.json().catch(() => ({}));
-        console.warn("API Key 검증 실패:", errorData);
-        setConnectionStatus("FAILED");
-      }
-    } catch (error) {
-      console.error("통신 오류:", error);
-      setConnectionStatus("FAILED");
-    }
-  };
-
-  const handleStartAnalysis = async () => {
-    if (!setupData) return;
     setIsSaving(true);
     setSavingMessage("프로젝트 설정을 저장하는 중...");
 
     try {
-      const baseVersion =
-        Number((setupData as Record<string, unknown>).version) || 1;
+      const baseVersion = Number((setupData as Record<string, unknown>).version) || 1;
       const response = await saveProjectSetup(
         setupData,
         projectId || undefined,
@@ -290,7 +261,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           }
 
           const sourceResponseData = await sourceRes.json();
-
+          
           if (sourceResponseData.source_id) {
             setSavingMessage("소스코드 구조 인덱싱을 요청하는 중...");
             const indexRes = await fetch(
@@ -298,9 +269,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
               {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  source_id: sourceResponseData.source_id,
-                }),
+                body: JSON.stringify({ source_id: sourceResponseData.source_id }),
               },
             );
 
@@ -309,7 +278,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
             }
 
             const indexJob = await indexRes.json();
-
+            
+            // 폴링 대기 로직 추가
             if (indexJob.id) {
               const finalJob = (await pollJobStatus(
                 newProjectId,
@@ -319,27 +289,24 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 }) => {
                   if (jobInfo.progress) {
                     setSavingMessage(
-                      `소스코드 분석 및 인덱싱 중... (${jobInfo.progress.completed}/${jobInfo.progress.total})`,
+                      `소스코드 인덱싱 중... (${jobInfo.progress.completed}/${jobInfo.progress.total})`
                     );
                   } else {
                     setSavingMessage("소스코드 인덱싱 진행 중...");
                   }
-                },
+                }
               )) as { status: string; error?: { message: string } };
 
-              if (
-                ["failed", "blocked", "cancelled"].includes(finalJob.status)
-              ) {
-                throw new Error(
-                  `[인덱싱 실패] ${finalJob.error?.message || finalJob.status}`,
-                );
+              if (["failed", "blocked", "cancelled"].includes(finalJob.status)) {
+                throw new Error(`[인덱싱 실패] ${finalJob.error?.message || finalJob.status}`);
               }
             }
           }
         }
 
         setProjectId(newProjectId);
-        onNavigateStep("ANALYSIS");
+        setIsUploaded(true);
+        alert("프로젝트 저장 및 파일 업로드가 완료되었습니다. 이제 AI API 연결을 확인해주세요.");
       } else {
         alert(`프로젝트 저장 실패: ${response.error || "알 수 없는 오류"}`);
       }
@@ -351,6 +318,57 @@ export const SetupView: React.FC<SetupViewProps> = ({
       setIsSaving(false);
       setSavingMessage("");
     }
+  };
+
+  const handleVerifyApiKeyMock = () => {
+    if (!projectId) {
+      alert("먼저 프로젝트를 저장하고 파일을 업로드해주세요.");
+      return;
+    }
+    setConnectionStatus("SUCCESS");
+    handleUpdateAiConfig("isConnected", true);
+    alert("[개발 모드] AI API 연결이 임시로 강제 통과되었습니다.");
+  };
+
+  const handleVerifyApiKey = async () => {
+    if (!projectId) {
+      alert("먼저 프로젝트를 저장하고 파일을 업로드해주세요.");
+      return;
+    }
+
+    setConnectionStatus("CHECKING");
+
+    try {
+      const res = await fetch(
+        `${BASE_URL}/projects/${projectId}/llm/connection-check`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ config_version: 0 }),
+        },
+      );
+
+      if (res.ok) {
+        setConnectionStatus("SUCCESS");
+        handleUpdateAiConfig("isConnected", true);
+        alert("AI API 연결이 성공적으로 확인되었습니다.");
+      } else {
+        const errorData = await res.json().catch(() => ({}));
+        console.warn(errorData);
+        setConnectionStatus("FAILED");
+      }
+    } catch (error) {
+      console.error(error);
+      setConnectionStatus("FAILED");
+    }
+  };
+
+  const handleStartAnalysis = () => {
+    if (!isUploaded) {
+      alert("먼저 프로젝트를 저장하고 파일을 업로드해주세요.");
+      return;
+    }
+    onNavigateStep("ANALYSIS");
   };
 
   if (isLoading || !setupData) {
@@ -543,35 +561,48 @@ export const SetupView: React.FC<SetupViewProps> = ({
               </div>
             </div>
 
-            <div className="space-y-2 pt-2 border-t border-slate-100">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <label className={VIEW_HEADER.fieldLabel}>
-                    분석 기술 스택
-                  </label>
-                  <Input
-                    type="text"
-                    value={setupData.techStack || ""}
-                    onChange={(e) =>
-                      handleUpdateField("techStack", e.target.value)
-                    }
-                    placeholder="예: Java · Spring Boot"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <label className={VIEW_HEADER.fieldLabel}>
-                    코드 분석 범위
-                  </label>
-                  <Input
-                    type="text"
-                    value={setupData.analysisScope || ""}
-                    onChange={(e) =>
-                      handleUpdateField("analysisScope", e.target.value)
-                    }
-                    placeholder="예: src/main/java"
-                  />
+            <div className="space-y-2 pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="w-full sm:w-auto">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <label className={VIEW_HEADER.fieldLabel}>
+                      분석 기술 스택
+                    </label>
+                    <Input
+                      type="text"
+                      value={setupData.techStack || ""}
+                      onChange={(e) =>
+                        handleUpdateField("techStack", e.target.value)
+                      }
+                      placeholder="예: Java · Spring Boot"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className={VIEW_HEADER.fieldLabel}>
+                      코드 분석 범위
+                    </label>
+                    <Input
+                      type="text"
+                      value={setupData.analysisScope || ""}
+                      onChange={(e) =>
+                        handleUpdateField("analysisScope", e.target.value)
+                      }
+                      placeholder="예: src/main/java"
+                    />
+                  </div>
                 </div>
               </div>
+
+              <Button
+                type="button"
+                variant={isUploaded ? "secondary" : "primary"}
+                size="lg"
+                onClick={handleSaveAndUpload}
+                disabled={isSaving}
+                className="whitespace-nowrap mt-4 sm:mt-0"
+              >
+                {isSaving ? savingMessage || "처리 중..." : isUploaded ? "설정 및 파일 저장 완료" : "설정 및 파일 저장"}
+              </Button>
             </div>
           </Card>
         </div>
@@ -687,8 +718,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
               <div className="flex items-center justify-between">
                 <span
                   className={`text-[11px] font-medium px-2 py-1 rounded-lg ${
-                    connectionStatus === "SUCCESS" ||
-                    setupData.aiConfig.isConnected
+                    connectionStatus === "SUCCESS" || setupData.aiConfig.isConnected
                       ? "bg-emerald-50 text-emerald-600"
                       : connectionStatus === "FAILED"
                         ? "bg-rose-50 text-rose-600"
@@ -699,8 +729,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 >
                   {connectionStatus === "CHECKING"
                     ? "연결 시도 중..."
-                    : connectionStatus === "SUCCESS" ||
-                        setupData.aiConfig.isConnected
+                    : connectionStatus === "SUCCESS" || setupData.aiConfig.isConnected
                       ? "연결 완료"
                       : connectionStatus === "FAILED"
                         ? "연결 실패"
@@ -710,10 +739,20 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 <div className="flex items-center space-x-1.5">
                   <Button
                     type="button"
+                    variant="ghost"
+                    size="md"
+                    onClick={handleVerifyApiKeyMock}
+                    disabled={!isUploaded}
+                    className="text-amber-600 bg-amber-50 hover:bg-amber-100"
+                  >
+                    임시 강제 통과
+                  </Button>
+                  <Button
+                    type="button"
                     variant="secondary"
                     size="md"
                     onClick={handleVerifyApiKey}
-                    disabled={connectionStatus === "CHECKING"}
+                    disabled={connectionStatus === "CHECKING" || !isUploaded}
                   >
                     {connectionStatus === "CHECKING"
                       ? "확인 중..."
@@ -724,8 +763,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
             </div>
 
             <p className="text-[11px] text-slate-400 leading-relaxed pt-2 border-t border-slate-100">
-              선택한 제공업체의 API 키로 연결을 확인하세요. 모델을 바꿔도 기존
-              분석 결과는 유지됩니다.
+              먼저 파일을 저장한 뒤, API 키로 연결을 확인하세요.
             </p>
           </Card>
 
@@ -736,20 +774,20 @@ export const SetupView: React.FC<SetupViewProps> = ({
           >
             <div className="space-y-3 pt-1 text-xs">
               <div>
-                <div className="font-semibold text-slate-800">1 명세 분석</div>
+                <div className="font-semibold text-slate-800">명세 분석</div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
                   요구사항과 수락 조건을 검토합니다.
                 </div>
               </div>
               <div>
-                <div className="font-semibold text-slate-800">2 코드 검증</div>
+                <div className="font-semibold text-slate-800">코드 검증</div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
                   코드 근거를 보고 차이를 확인합니다.
                 </div>
               </div>
               <div>
                 <div className="font-semibold text-slate-800">
-                  3 테스트 사양서
+                  테스트 사양서
                 </div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
                   시험 절차를 만들고 결과를 기록합니다.
@@ -767,7 +805,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <div className="text-xs font-semibold text-slate-800">
-            명세를 분석한 뒤 추출된 요구사항을 검토하세요.
+            파일 저장과 AI 연결 검증이 끝났다면 명세 분석을 시작하세요.
           </div>
           <div className="text-[11px] text-slate-400 mt-0.5">
             검증 항목: 입력값 · 경로 및 이동 · 비즈니스 로직 · 데이터 저장 ·
@@ -779,10 +817,10 @@ export const SetupView: React.FC<SetupViewProps> = ({
           variant="primary"
           size="lg"
           onClick={handleStartAnalysis}
-          disabled={isSaving}
+          disabled={!isUploaded}
           className="whitespace-nowrap"
         >
-          {isSaving ? savingMessage || "처리 중..." : "명세 분석 시작"}
+          명세 분석 시작
         </Button>
       </div>
     </div>

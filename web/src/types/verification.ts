@@ -8,7 +8,7 @@ export interface CodeEvidence {
   issueCode?: string;
   description?: string;
   suggestedFix?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 // 검증 결과 개별 항목
@@ -23,7 +23,7 @@ export interface VerificationResultItem {
   totalCriteriaCount: number;
   callChain?: string[];
   evidenceList: CodeEvidence[];
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export interface SourceRef {

@@ -1,10 +1,16 @@
-import React, { useState, useEffect } from 'react';
-import type { StepId, AIModelOption, ProjectSetupData } from '../types';
-import { fetchProjectSetup, saveProjectSetup, uploadDocument } from '../services/api';
-import { useProject } from '../contexts/ProjectContext';
-import { useFileUpload } from '../hooks';
-import { Button, Card, Input, PageHeader } from '../components/common';
-import { VIEW_HEADER } from '../styles/typography';
+import React, { useState, useEffect } from "react";
+import type { StepId, AIModelOption, ProjectSetupData } from "../types";
+import {
+  fetchProjectSetup,
+  saveProjectSetup,
+  uploadDocument,
+  pollJobStatus,
+  BASE_URL,
+} from "../services/api";
+import { useProject } from "../contexts/ProjectContext";
+import { useFileUpload } from "../hooks";
+import { Button, Card, Input, PageHeader } from "../components/common";
+import { VIEW_HEADER } from "../styles/typography";
 
 interface SetupViewProps {
   onNavigateStep: (step: StepId) => void;
@@ -12,14 +18,16 @@ interface SetupViewProps {
   initialData?: ProjectSetupData;
 }
 
-const BASE_URL = 'http://127.0.0.1:8000/api/v2';
-
 const DEFAULT_AI_MODELS: AIModelOption[] = [
-  { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'Google' },
-  { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', provider: 'Google' },
-  { id: 'gpt-4.1', name: 'GPT-4.1', provider: 'OpenAI' },
-  { id: 'claude-sonnet-4.6', name: 'Claude Sonnet 4.6', provider: 'Anthropic' },
+  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google" },
+  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "Google" },
+  { id: "gpt-4.1", name: "GPT-4.1", provider: "OpenAI" },
+  { id: "claude-sonnet-4.6", name: "Claude Sonnet 4.6", provider: "Anthropic" },
 ];
+
+const generateSnapshotId = () => {
+  return "UPLOAD-" + new Date().getTime().toString().slice(-4);
+};
 
 export const SetupView: React.FC<SetupViewProps> = ({
   onNavigateStep,
@@ -27,221 +35,346 @@ export const SetupView: React.FC<SetupViewProps> = ({
   initialData,
 }) => {
   const { projectId, setProjectId } = useProject();
-  const [setupData, setSetupData] = useState<ProjectSetupData | null>(initialData || null);
-  const [aiModels] = useState<AIModelOption[]>(DEFAULT_AI_MODELS);
-  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
-  const [codeSourceTab, setCodeSourceTab] = useState<'ZIP' | 'GIT'>('ZIP');
-  
-  const [connectionStatus, setConnectionStatus] = useState<'IDLE' | 'CHECKING' | 'SUCCESS' | 'FAILED'>('IDLE');
 
-  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [setupData, setSetupData] = useState<ProjectSetupData | null>(() => {
+    if (initialData) return initialData;
+    if (!projectId) {
+      return {
+        projectName: "",
+        specFile: null,
+        codeSource: null,
+        techStack: "",
+        analysisScope: "",
+        aiConfig: {
+          modelId: DEFAULT_AI_MODELS[0].id,
+          apiKey: "",
+          isConnected: false,
+        },
+      };
+    }
+    return null;
+  });
+
+  const [aiModels, setAiModels] = useState<AIModelOption[]>(DEFAULT_AI_MODELS);
+  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
+  const [codeSourceTab, setCodeSourceTab] = useState<"ZIP" | "GIT">("ZIP");
+
+  const [connectionStatus, setConnectionStatus] = useState<
+    "IDLE" | "CHECKING" | "SUCCESS" | "FAILED"
+  >("IDLE");
+
+  const [isLoading, setIsLoading] = useState<boolean>(
+    !!projectId && !initialData,
+  );
   const [isSaving, setIsSaving] = useState<boolean>(false);
+  const [savingMessage, setSavingMessage] = useState<string>("");
 
   const [specFile, setSpecFile] = useState<File | null>(null);
   const [codeFile, setCodeFile] = useState<File | null>(null);
 
-  const specUpload = useFileUpload({
-    accept: '.pdf,.docx,.xlsx',
+  useEffect(() => {
+    fetch(`${BASE_URL}/llm/models`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && data.items && data.items.length > 0) {
+          setAiModels(
+            data.items.map((m: Record<string, unknown>) => ({
+              id: String(m.id || m.model_id || ""),
+              name: String(m.name || m.model_name || m.id || ""),
+              provider: String(m.provider || "Unknown"),
+            })),
+          );
+        }
+      })
+      .catch((err) => console.error("모델 목록 로딩 에러 (기본값 사용):", err));
+  }, []);
+
+  const {
+    inputRef: specInputRef,
+    handleFileChange: onSpecFileChange,
+    isDragging: isSpecDragging,
+    handleDragOver: onSpecDragOver,
+    handleDragLeave: onSpecDragLeave,
+    handleDrop: onSpecDrop,
+    openFileDialog: openSpecFileDialog,
+  } = useFileUpload({
+    accept: ".pdf",
     onFileSelect: (selectedFile) => {
       setSpecFile(selectedFile);
-      const ext = selectedFile.name.split('.').pop() || 'pdf';
-      handleUpdateField('specDocument' as any, {
-        name: selectedFile.name,
-        format: ext,
-        pages: 1,
-        version: 'v1.0',
+      handleUpdateField("specFile", {
+        fileName: selectedFile.name,
+        pageCount: 1,
+        version: "v1.0",
+        uploaded: false,
       });
     },
   });
 
-  const codeUpload = useFileUpload({
-    accept: '.zip',
+  const {
+    inputRef: codeInputRef,
+    handleFileChange: onCodeFileChange,
+    openFileDialog: openCodeFileDialog,
+  } = useFileUpload({
+    accept: ".zip",
     onFileSelect: (selectedFile) => {
       setCodeFile(selectedFile);
-      handleUpdateField('sourceCode' as any, {
-        name: selectedFile.name,
+      handleUpdateField("codeSource", {
+        type: "ZIP",
+        sourceName: selectedFile.name,
         fileCount: 0,
-        snapshotId: 'UPLOAD-' + Date.now().toString().slice(-4),
+        snapshotId: generateSnapshotId(),
       });
     },
   });
 
   useEffect(() => {
-    if (!projectId) {
-      setSetupData({
-        projectName: '',
-        techStack: '',
-        codeScope: '',
-        apiKey: '',
-        apiKeyVerified: false,
-        selectedModelId: DEFAULT_AI_MODELS[0].id,
-      } as unknown as ProjectSetupData);
-      setIsLoading(false);
-      return;
-    }
+    if (!projectId) return;
 
     Promise.all([
       fetchProjectSetup(projectId),
-      fetch(`${BASE_URL}/projects/${projectId}/documents`).then(res => res.json()).catch(() => ({ items: [] })),
-      fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`).then(res => res.json()).catch(() => ({ items: [] }))
+      fetch(`${BASE_URL}/projects/${projectId}/documents`)
+        .then((res) => res.json())
+        .catch(() => ({ items: [] })),
+      fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`)
+        .then((res) => res.json())
+        .catch(() => ({ items: [] })),
     ])
       .then(([setup, docsData, codeData]) => {
         if (!initialData) {
-          const updatedSetup: any = {
-            projectName: '',
-            selectedModelId: DEFAULT_AI_MODELS[0].id,
-            ...(setup || {})
+          const updatedSetup: ProjectSetupData = {
+            projectName: setup?.projectName || "",
+            techStack: setup?.techStack || "",
+            analysisScope: setup?.analysisScope || "",
+            aiConfig: {
+              modelId: setup?.aiConfig?.modelId || aiModels[0].id,
+              apiKey: setup?.aiConfig?.apiKey || "",
+              isConnected: setup?.aiConfig?.isConnected || false,
+            },
+            specFile: setup?.specFile || null,
+            codeSource: setup?.codeSource || null,
           };
 
           if (docsData.items && docsData.items.length > 0) {
             const doc = docsData.items[0];
-            updatedSetup.specDocument = {
-              name: doc.name || '기존_업로드된_기획서.pdf',
-              format: 'pdf',
-              pages: 1,
-              version: `v${doc.revision || 1}.0`
+            updatedSetup.specFile = {
+              fileName: doc.name || "기존_업로드된_기획서.pdf",
+              pageCount: 1,
+              version: `v${doc.revision || 1}.0`,
             };
           }
 
           if (codeData.items && codeData.items.length > 0) {
             const snap = codeData.items[0];
-            updatedSetup.sourceCode = {
-              name: '기존_업로드된_소스코드.zip',
+            updatedSetup.codeSource = {
+              type: "ZIP",
+              sourceName: "기존_업로드된_소스코드.zip",
               fileCount: snap.file_count || 0,
-              snapshotId: snap.id
+              snapshotId: snap.id,
             };
           }
 
-          setSetupData(updatedSetup as unknown as ProjectSetupData);
+          setSetupData(updatedSetup);
         }
       })
       .catch((err) => {
-        console.error('설정 데이터 로드 실패:', err);
+        console.error("설정 데이터 로드 실패:", err);
       })
       .finally(() => {
         setIsLoading(false);
       });
-  }, [initialData, projectId]);
+  }, [initialData, projectId, aiModels]);
 
   const currentModel =
-    aiModels.find((m) => m.id === setupData?.selectedModelId) || aiModels[0];
+    aiModels.find((m) => m.id === setupData?.aiConfig.modelId) || aiModels[0];
 
   const handleUpdateField = <K extends keyof ProjectSetupData>(
     field: K,
-    value: ProjectSetupData[K]
+    value: ProjectSetupData[K],
   ) => {
     if (!setupData) return;
     const updated = { ...setupData, [field]: value };
     setSetupData(updated);
-    if (field === 'projectName' && typeof value === 'string') {
+    if (field === "projectName" && typeof value === "string") {
       onProjectUpdated?.(value);
     }
   };
 
-  const handleVerifyApiKey = async () => {
-    setConnectionStatus('CHECKING');
+  const handleUpdateAiConfig = (
+    key: keyof ProjectSetupData["aiConfig"],
+    value: string | boolean,
+  ) => {
+    if (!setupData) return;
+    setSetupData({
+      ...setupData,
+      aiConfig: {
+        ...setupData.aiConfig,
+        [key]: value,
+      },
+    });
+  };
 
+  const handleVerifyApiKey = async () => {
     if (!projectId) {
-      setTimeout(() => {
-        setConnectionStatus('SUCCESS');
-        handleUpdateField('apiKeyVerified' as any, true);
-      }, 800);
+      alert(
+        "프로젝트를 먼저 생성해야 AI 모델 연결을 확인할 수 있습니다. 하단의 [명세 분석 시작]을 눌러 프로젝트를 저장하세요.",
+      );
       return;
     }
 
+    setConnectionStatus("CHECKING");
+
     try {
-      const res = await fetch(`${BASE_URL}/projects/${projectId}/llm/connection-check`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ config_version: 0 })
-      });
+      const res = await fetch(
+        `${BASE_URL}/projects/${projectId}/llm/connection-check`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ config_version: 0 }),
+        },
+      );
 
       if (res.ok) {
-        setConnectionStatus('SUCCESS');
-        handleUpdateField('apiKeyVerified' as any, true);
+        setConnectionStatus("SUCCESS");
+        handleUpdateAiConfig("isConnected", true);
       } else {
-        setConnectionStatus('FAILED');
+        const errorData = await res.json().catch(() => ({}));
+        console.warn("API Key 검증 실패:", errorData);
+        setConnectionStatus("FAILED");
       }
     } catch (error) {
-      console.error(error);
-      setConnectionStatus('FAILED');
+      console.error("통신 오류:", error);
+      setConnectionStatus("FAILED");
     }
-  };
-
-  const handleBypassConnection = () => {
-    setConnectionStatus('SUCCESS');
-    handleUpdateField('apiKeyVerified' as any, true);
   };
 
   const handleStartAnalysis = async () => {
     if (!setupData) return;
     setIsSaving(true);
-    
+    setSavingMessage("프로젝트 설정을 저장하는 중...");
+
     try {
-      const response = await saveProjectSetup(setupData);
-      
+      const baseVersion =
+        Number((setupData as Record<string, unknown>).version) || 1;
+      const response = await saveProjectSetup(
+        setupData,
+        projectId || undefined,
+        baseVersion,
+      );
+
       if (response.success && response.projectId) {
         const newProjectId = response.projectId;
 
         if (specFile) {
+          setSavingMessage("명세 문서를 서버에 업로드하는 중...");
           await uploadDocument(newProjectId, specFile);
         }
 
-        if (codeSourceTab === 'ZIP' && codeFile) {
+        if (codeSourceTab === "ZIP" && codeFile) {
+          setSavingMessage("소스코드를 업로드하는 중...");
           const formData = new FormData();
-          formData.append('file', codeFile);
-          
-          const sourceRes = await fetch(`${BASE_URL}/projects/${newProjectId}/code/sources`, {
-            method: 'POST',
-            body: formData,
-          });
-          
-          if (sourceRes.ok) {
-            const sourceData = await sourceRes.json();
-            if (sourceData.source_id) {
-              await fetch(`${BASE_URL}/projects/${newProjectId}/code/index`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ source_id: sourceData.source_id })
-              });
+          formData.append("file", codeFile);
+
+          const sourceRes = await fetch(
+            `${BASE_URL}/projects/${newProjectId}/code/sources`,
+            {
+              method: "POST",
+              body: formData,
+            },
+          );
+
+          if (!sourceRes.ok) {
+            const errData = await sourceRes.json().catch(() => ({}));
+            throw new Error(
+              errData.error?.message || "소스코드 업로드에 실패했습니다.",
+            );
+          }
+
+          const sourceResponseData = await sourceRes.json();
+
+          if (sourceResponseData.source_id) {
+            setSavingMessage("소스코드 구조 인덱싱을 요청하는 중...");
+            const indexRes = await fetch(
+              `${BASE_URL}/projects/${newProjectId}/code/index`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  source_id: sourceResponseData.source_id,
+                }),
+              },
+            );
+
+            if (!indexRes.ok) {
+              throw new Error("코드 인덱싱 요청 접수에 실패했습니다.");
+            }
+
+            const indexJob = await indexRes.json();
+
+            if (indexJob.id) {
+              const finalJob = (await pollJobStatus(
+                newProjectId,
+                indexJob.id,
+                (jobInfo: {
+                  progress?: { completed: number; total: number };
+                }) => {
+                  if (jobInfo.progress) {
+                    setSavingMessage(
+                      `소스코드 분석 및 인덱싱 중... (${jobInfo.progress.completed}/${jobInfo.progress.total})`,
+                    );
+                  } else {
+                    setSavingMessage("소스코드 인덱싱 진행 중...");
+                  }
+                },
+              )) as { status: string; error?: { message: string } };
+
+              if (
+                ["failed", "blocked", "cancelled"].includes(finalJob.status)
+              ) {
+                throw new Error(
+                  `[인덱싱 실패] ${finalJob.error?.message || finalJob.status}`,
+                );
+              }
             }
           }
         }
 
         setProjectId(newProjectId);
-        onNavigateStep('ANALYSIS');
+        onNavigateStep("ANALYSIS");
       } else {
-        alert('프로젝트 생성에 실패했습니다. 백엔드 연결을 확인해 주세요.');
+        alert(`프로젝트 저장 실패: ${response.error || "알 수 없는 오류"}`);
       }
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error(error);
-      alert(`파일 처리 오류: ${error.message}`);
+      const msg = error instanceof Error ? error.message : "알 수 없는 오류";
+      alert(`프로젝트 설정 저장 중 오류가 발생했습니다:\n${msg}`);
     } finally {
       setIsSaving(false);
+      setSavingMessage("");
     }
   };
 
   if (isLoading || !setupData) {
     return (
-      <div className="max-w-[1080px] mx-auto py-12 text-center text-xs text-slate-400">
+      <div className="max-w-6xl mx-auto py-12 text-center text-xs text-slate-400">
         프로젝트 설정 정보를 불러오는 중입니다...
       </div>
     );
   }
 
-  const isSpecUploaded = !!(setupData as any).specDocument?.name;
-  const isSourceUploaded = !!(setupData as any).sourceCode?.name;
+  const isSpecUploaded = !!setupData.specFile?.fileName;
+  const isSourceUploaded = !!setupData.codeSource?.sourceName;
 
   return (
-    <div className="max-w-[1080px] mx-auto py-2 px-2 md:px-4 space-y-5">
+    <div className="max-w-6xl mx-auto py-2 px-2 md:px-4 space-y-5">
       <PageHeader
         stepTag="01 / PROJECT SETUP"
-        title={setupData.projectName ? '프로젝트 설정' : '새 프로젝트 만들기'}
+        title={setupData.projectName ? "프로젝트 설정" : "새 프로젝트 만들기"}
         description={
           setupData.projectName
-            ? '명세 문서와 검증할 코드를 연결하고 분석 범위를 확인하세요.'
-            : '먼저 명세와 코드를 연결하세요. 분석 설정은 이후에도 바꿀 수 있습니다.'
-        }/>
+            ? "명세 문서와 검증할 코드를 연결하고 분석 범위를 확인하세요."
+            : "먼저 명세와 코드를 연결하세요. 분석 설정은 이후에도 바꿀 수 있습니다."
+        }
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
         <div className="lg:col-span-8">
@@ -255,23 +388,25 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 <label className={VIEW_HEADER.fieldLabel}>프로젝트 이름</label>
                 <Input
                   type="text"
-                  value={setupData.projectName || ''}
+                  value={setupData.projectName || ""}
                   placeholder="프로젝트 이름을 입력하세요"
-                  onChange={(e) => handleUpdateField('projectName', e.target.value)}
+                  onChange={(e) =>
+                    handleUpdateField("projectName", e.target.value)
+                  }
                 />
               </div>
 
               <input
                 type="file"
-                ref={specUpload.inputRef}
-                onChange={specUpload.handleFileChange}
-                accept=".pdf,.docx,.xlsx"
+                ref={specInputRef as React.Ref<HTMLInputElement>}
+                onChange={onSpecFileChange}
+                accept=".pdf"
                 className="hidden"
               />
               <input
                 type="file"
-                ref={codeUpload.inputRef}
-                onChange={codeUpload.handleFileChange}
+                ref={codeInputRef as React.Ref<HTMLInputElement>}
+                onChange={onCodeFileChange}
                 accept=".zip"
                 className="hidden"
               />
@@ -290,41 +425,44 @@ export const SetupView: React.FC<SetupViewProps> = ({
                   <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex items-center justify-between">
                     <div>
                       <div className="text-xs font-medium text-slate-800">
-                        {(setupData as any).specDocument?.name}
+                        {setupData.specFile?.fileName}
                       </div>
                       <div className="text-[11px] text-slate-400 mt-0.5">
-                        {(setupData as any).specDocument?.format?.toUpperCase()} · {(setupData as any).specDocument?.pages ?? 1}페이지 · {(setupData as any).specDocument?.version ?? 'v1.0'}
+                        PDF · {setupData.specFile?.pageCount ?? 1}페이지 ·{" "}
+                        {setupData.specFile?.version ?? "v1.0"}
                       </div>
                     </div>
                     <Button
                       type="button"
                       variant="secondary"
                       size="md"
-                      onClick={specUpload.openFileDialog}
+                      onClick={openSpecFileDialog}
                     >
                       문서 교체
                     </Button>
                   </div>
                 ) : (
                   <div
-                    onDragOver={specUpload.handleDragOver}
-                    onDragLeave={specUpload.handleDragLeave}
-                    onDrop={specUpload.handleDrop}
+                    onDragOver={onSpecDragOver}
+                    onDragLeave={onSpecDragLeave}
+                    onDrop={onSpecDrop}
                     className={`border border-dashed rounded-xl py-8 px-4 flex flex-col items-center justify-center text-center space-y-2 transition-colors ${
-                      specUpload.isDragging
-                        ? 'border-blue-500 bg-blue-50/50'
-                        : 'border-slate-200 bg-slate-50/50'
+                      isSpecDragging
+                        ? "border-blue-500 bg-blue-50/50"
+                        : "border-slate-200 bg-slate-50/50"
                     }`}
                   >
                     <p className="text-xs font-medium text-slate-700">
                       명세 문서를 여기에 놓으세요
                     </p>
-                    <p className="text-[11px] text-slate-400">PDF · DOCX · XLSX</p>
+                    <p className="text-[11px] text-slate-400">
+                      오직 PDF 파일만 지원됩니다
+                    </p>
                     <Button
                       type="button"
                       variant="primary"
                       size="md"
-                      onClick={specUpload.openFileDialog}
+                      onClick={openSpecFileDialog}
                       className="mt-1"
                     >
                       명세 파일 선택
@@ -334,42 +472,47 @@ export const SetupView: React.FC<SetupViewProps> = ({
               </div>
 
               <div className="space-y-2">
-                <label className={VIEW_HEADER.fieldLabel}>검증 대상 소스코드</label>
+                <label className={VIEW_HEADER.fieldLabel}>
+                  검증 대상 소스코드
+                </label>
                 <div className="flex items-center space-x-1.5">
                   <Button
                     type="button"
-                    variant={codeSourceTab === 'ZIP' ? 'primary' : 'secondary'}
+                    variant={codeSourceTab === "ZIP" ? "primary" : "secondary"}
                     size="sm"
-                    onClick={() => setCodeSourceTab('ZIP')}
+                    onClick={() => setCodeSourceTab("ZIP")}
                   >
                     ZIP 업로드
                   </Button>
                   <Button
                     type="button"
-                    variant={codeSourceTab === 'GIT' ? 'primary' : 'secondary'}
+                    variant={codeSourceTab === "GIT" ? "primary" : "secondary"}
                     size="sm"
-                    onClick={() => setCodeSourceTab('GIT')}
+                    onClick={() => setCodeSourceTab("GIT")}
                   >
                     Git 저장소
                   </Button>
                 </div>
 
-                {codeSourceTab === 'ZIP' ? (
+                {codeSourceTab === "ZIP" ? (
                   isSourceUploaded ? (
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 mt-2 flex items-center justify-between">
                       <div>
                         <div className="text-xs font-medium text-slate-800">
-                          {(setupData as any).sourceCode?.name}
+                          {setupData.codeSource?.sourceName}
                         </div>
                         <div className="text-[11px] text-slate-400 mt-0.5">
-                          {(setupData as any).sourceCode?.fileCount ? `${(setupData as any).sourceCode.fileCount}개 파일 · ` : ''}코드 스냅샷 {(setupData as any).sourceCode?.snapshotId}
+                          {setupData.codeSource?.fileCount
+                            ? `${setupData.codeSource.fileCount}개 파일 · `
+                            : ""}
+                          코드 스냅샷 {setupData.codeSource?.snapshotId}
                         </div>
                       </div>
                       <Button
                         type="button"
                         variant="secondary"
                         size="md"
-                        onClick={codeUpload.openFileDialog}
+                        onClick={openCodeFileDialog}
                       >
                         파일 교체
                       </Button>
@@ -383,7 +526,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
                         type="button"
                         variant="secondary"
                         size="md"
-                        onClick={codeUpload.openFileDialog}
+                        onClick={openCodeFileDialog}
                       >
                         코드 ZIP 선택
                       </Button>
@@ -403,20 +546,28 @@ export const SetupView: React.FC<SetupViewProps> = ({
             <div className="space-y-2 pt-2 border-t border-slate-100">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-1.5">
-                  <label className={VIEW_HEADER.fieldLabel}>분석 기술 스택</label>
+                  <label className={VIEW_HEADER.fieldLabel}>
+                    분석 기술 스택
+                  </label>
                   <Input
                     type="text"
-                    value={(setupData as any).techStack || ''}
-                    onChange={(e) => handleUpdateField('techStack' as any, e.target.value)}
+                    value={setupData.techStack || ""}
+                    onChange={(e) =>
+                      handleUpdateField("techStack", e.target.value)
+                    }
                     placeholder="예: Java · Spring Boot"
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <label className={VIEW_HEADER.fieldLabel}>코드 분석 범위</label>
+                  <label className={VIEW_HEADER.fieldLabel}>
+                    코드 분석 범위
+                  </label>
                   <Input
                     type="text"
-                    value={(setupData as any).codeScope || ''}
-                    onChange={(e) => handleUpdateField('codeScope' as any, e.target.value)}
+                    value={setupData.analysisScope || ""}
+                    onChange={(e) =>
+                      handleUpdateField("analysisScope", e.target.value)
+                    }
                     placeholder="예: src/main/java"
                   />
                 </div>
@@ -438,12 +589,12 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 onClick={() => setIsDropdownOpen(!isDropdownOpen)}
                 className={`w-full px-3 py-2.5 bg-white border rounded-xl flex items-center justify-between text-xs transition-all ${
                   isDropdownOpen
-                    ? 'border-blue-500 ring-2 ring-blue-100'
-                    : 'border-slate-200 hover:border-slate-300'
+                    ? "border-blue-500 ring-2 ring-blue-100"
+                    : "border-slate-200 hover:border-slate-300"
                 }`}
               >
                 <span className="font-medium text-slate-800">
-                  {currentModel?.name || '모델을 선택하세요'}
+                  {currentModel?.name || "모델을 선택하세요"}
                 </span>
                 <div className="flex items-center space-x-2">
                   <span className="text-[11px] text-slate-400">
@@ -451,13 +602,18 @@ export const SetupView: React.FC<SetupViewProps> = ({
                   </span>
                   <svg
                     className={`w-3.5 h-3.5 text-slate-400 transition-transform ${
-                      isDropdownOpen ? 'rotate-180' : ''
+                      isDropdownOpen ? "rotate-180" : ""
                     }`}
                     fill="none"
                     viewBox="0 0 24 24"
                     stroke="currentColor"
                   >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 9l-7 7-7-7"
+                    />
                   </svg>
                 </div>
               </button>
@@ -468,19 +624,21 @@ export const SetupView: React.FC<SetupViewProps> = ({
                     분석 모델 선택 · 한 번에 1개
                   </div>
                   {aiModels.map((model) => {
-                    const isSelected = ((setupData as any).selectedModelId || currentModel?.id) === model.id;
+                    const isSelected =
+                      (setupData.aiConfig.modelId || currentModel?.id) ===
+                      model.id;
                     return (
                       <button
                         key={model.id}
                         type="button"
                         onClick={() => {
-                          handleUpdateField('selectedModelId' as any, model.id);
+                          handleUpdateAiConfig("modelId", model.id);
                           setIsDropdownOpen(false);
                         }}
                         className={`w-full px-3 py-2 text-left rounded-lg text-xs flex items-center justify-between transition-colors ${
                           isSelected
-                            ? 'bg-blue-50 text-blue-600 font-semibold'
-                            : 'hover:bg-slate-50 text-slate-700'
+                            ? "bg-blue-50 text-blue-600 font-semibold"
+                            : "hover:bg-slate-50 text-slate-700"
                         }`}
                       >
                         <div>
@@ -490,8 +648,18 @@ export const SetupView: React.FC<SetupViewProps> = ({
                           </div>
                         </div>
                         {isSelected && (
-                          <svg className="w-4 h-4 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                          <svg
+                            className="w-4 h-4 text-blue-600"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            stroke="currentColor"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={2.5}
+                              d="M5 13l4 4L19 7"
+                            />
                           </svg>
                         )}
                       </button>
@@ -505,37 +673,38 @@ export const SetupView: React.FC<SetupViewProps> = ({
               <label className={VIEW_HEADER.fieldLabel}>API 키</label>
               <Input
                 type="password"
-                value={(setupData as any).apiKey || ''}
+                value={setupData.aiConfig.apiKey || ""}
                 onChange={(e) => {
-                  handleUpdateField('apiKey' as any, e.target.value);
-                  setConnectionStatus('IDLE');
+                  handleUpdateAiConfig("apiKey", e.target.value);
+                  setConnectionStatus("IDLE");
                 }}
                 placeholder="제공업체 API 키 입력"
                 className="tracking-wider"
               />
             </div>
 
-            {/* 실제 연결 상태에 따른 UI 피드백 및 강제 통과 버튼 */}
             <div className="space-y-2 pt-1">
               <div className="flex items-center justify-between">
                 <span
                   className={`text-[11px] font-medium px-2 py-1 rounded-lg ${
-                    connectionStatus === 'SUCCESS' || (setupData as any).apiKeyVerified
-                      ? 'bg-emerald-50 text-emerald-600'
-                      : connectionStatus === 'FAILED'
-                      ? 'bg-rose-50 text-rose-600'
-                      : connectionStatus === 'CHECKING'
-                      ? 'bg-amber-50 text-amber-600 animate-pulse'
-                      : 'bg-blue-50 text-blue-600'
+                    connectionStatus === "SUCCESS" ||
+                    setupData.aiConfig.isConnected
+                      ? "bg-emerald-50 text-emerald-600"
+                      : connectionStatus === "FAILED"
+                        ? "bg-rose-50 text-rose-600"
+                        : connectionStatus === "CHECKING"
+                          ? "bg-amber-50 text-amber-600 animate-pulse"
+                          : "bg-blue-50 text-blue-600"
                   }`}
                 >
-                  {connectionStatus === 'CHECKING'
-                    ? '연결 시도 중...'
-                    : connectionStatus === 'SUCCESS' || (setupData as any).apiKeyVerified
-                    ? '연결 완료'
-                    : connectionStatus === 'FAILED'
-                    ? '연결 실패'
-                    : '연결 확인 필요'}
+                  {connectionStatus === "CHECKING"
+                    ? "연결 시도 중..."
+                    : connectionStatus === "SUCCESS" ||
+                        setupData.aiConfig.isConnected
+                      ? "연결 완료"
+                      : connectionStatus === "FAILED"
+                        ? "연결 실패"
+                        : "연결 확인 필요"}
                 </span>
 
                 <div className="flex items-center space-x-1.5">
@@ -544,28 +713,19 @@ export const SetupView: React.FC<SetupViewProps> = ({
                     variant="secondary"
                     size="md"
                     onClick={handleVerifyApiKey}
-                    disabled={connectionStatus === 'CHECKING'}
+                    disabled={connectionStatus === "CHECKING"}
                   >
-                    {connectionStatus === 'CHECKING' ? '확인 중...' : '실제 연결 확인'}
+                    {connectionStatus === "CHECKING"
+                      ? "확인 중..."
+                      : "실제 연결 확인"}
                   </Button>
                 </div>
               </div>
-
-              {connectionStatus === 'FAILED' && (
-                <div className="pt-1">
-                  <button
-                    type="button"
-                    onClick={handleBypassConnection}
-                    className="w-full py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-medium transition-colors border border-slate-300"
-                  >
-                    🛠️ [시연용] 검증 실패 무시하고 강제 통과하기
-                  </button>
-                </div>
-              )}
             </div>
 
             <p className="text-[11px] text-slate-400 leading-relaxed pt-2 border-t border-slate-100">
-              선택한 제공업체의 API 키로 연결을 확인하세요. 모델을 바꿔도 기존 분석 결과는 유지됩니다.
+              선택한 제공업체의 API 키로 연결을 확인하세요. 모델을 바꿔도 기존
+              분석 결과는 유지됩니다.
             </p>
           </Card>
 
@@ -588,7 +748,9 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 </div>
               </div>
               <div>
-                <div className="font-semibold text-slate-800">3 테스트 사양서</div>
+                <div className="font-semibold text-slate-800">
+                  3 테스트 사양서
+                </div>
                 <div className="text-[11px] text-slate-400 mt-0.5">
                   시험 절차를 만들고 결과를 기록합니다.
                 </div>
@@ -608,7 +770,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
             명세를 분석한 뒤 추출된 요구사항을 검토하세요.
           </div>
           <div className="text-[11px] text-slate-400 mt-0.5">
-            검증 항목: 입력값 · 경로 및 이동 · 비즈니스 로직 · 데이터 저장 · 오류 메시지
+            검증 항목: 입력값 · 경로 및 이동 · 비즈니스 로직 · 데이터 저장 ·
+            오류 메시지
           </div>
         </div>
         <Button
@@ -619,7 +782,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           disabled={isSaving}
           className="whitespace-nowrap"
         >
-          {isSaving ? '파일 업로드 중...' : '명세 분석 시작'}
+          {isSaving ? savingMessage || "처리 중..." : "명세 분석 시작"}
         </Button>
       </div>
     </div>

@@ -4,7 +4,7 @@ export interface SpecFileInfo {
   pageCount?: number;
   version?: string;
   uploaded?: boolean;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 // 소스코드 소스 정보
@@ -13,7 +13,7 @@ export interface CodeSourceInfo {
   sourceName: string;
   fileCount?: number;
   snapshotId?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 // 프로젝트 설정 전체 데이터
@@ -27,7 +27,7 @@ export interface ProjectSetupData {
     modelId: string;
     apiKey: string;
     isConnected: boolean;
-    [key: string]: any;
+    [key: string]: unknown;
   };
-  [key: string]: any;
+  [key: string]: unknown;
 }

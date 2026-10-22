@@ -1,9 +1,21 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import type { StepId, RequirementItem, ProjectSetupData } from '../types';
-import { useProject } from '../contexts/ProjectContext';
-import { Button, Card, Input, StatusBadge, PageHeader } from '../components/common';
-import { VerificationDetail } from '../components/verification/VerificationDetail';
-import { fetchRequirements, fetchProjectSetup, pollJobStatus } from '../services/api';
+import React, { useState, useEffect, useMemo } from "react";
+import type { StepId, RequirementItem, ProjectSetupData } from "../types";
+import { useProject } from "../contexts/ProjectContext";
+import {
+  Button,
+  Card,
+  Input,
+  StatusBadge,
+  PageHeader,
+} from "../components/common";
+import { VerificationDetail } from "../components/verification/VerificationDetail";
+import {
+  fetchRequirements,
+  fetchProjectSetup,
+  pollJobStatus,
+  fetchVerificationRuns,
+  BASE_URL,
+} from "../services/api";
 
 interface VerificationViewProps {
   onNavigateStep: (step: StepId) => void;
@@ -13,11 +25,11 @@ interface VerificationViewProps {
 }
 
 export type VerificationStatus =
-  | 'IMPLEMENTED'
-  | 'PARTIAL'
-  | 'MISMATCHED'
-  | 'UNIMPLEMENTED'
-  | 'NEED_CHECK';
+  | "IMPLEMENTED"
+  | "PARTIAL"
+  | "MISMATCHED"
+  | "UNIMPLEMENTED"
+  | "NEED_CHECK";
 
 export interface TraceabilityRow {
   stable_key: string;
@@ -30,56 +42,91 @@ export interface TraceabilityRow {
 
 const mockTraceabilityRows: TraceabilityRow[] = [
   {
-    stable_key: 'NOTICE-001',
-    featureName: '공지사항 목록 조회',
-    status: 'IMPLEMENTED',
-    statusLabel: '구현',
-    linkedCode: 'NoticeQueryService.java:22',
-    summary: '조회 조건과 응답 구조가 일치합니다.',
+    stable_key: "NOTICE-001",
+    featureName: "공지사항 목록 조회",
+    status: "IMPLEMENTED",
+    statusLabel: "구현",
+    linkedCode: "NoticeQueryService.java:22",
+    summary: "조회 조건과 응답 구조가 일치합니다.",
   },
   {
-    stable_key: 'NOTICE-002',
-    featureName: '공지사항 작성',
-    status: 'MISMATCHED',
-    statusLabel: '불일치',
-    linkedCode: 'NoticeService.java:34',
-    summary: '명세 300MB · 서버 제한 50MB',
+    stable_key: "NOTICE-002",
+    featureName: "공지사항 작성",
+    status: "MISMATCHED",
+    statusLabel: "불일치",
+    linkedCode: "NoticeService.java:34",
+    summary: "명세 300MB · 서버 제한 50MB",
   },
   {
-    stable_key: 'NOTICE-003',
-    featureName: '공지사항 수정',
-    status: 'PARTIAL',
-    statusLabel: '부분구현',
-    linkedCode: 'NoticeService.java:76',
-    summary: '첨부파일 교체 시 이전 파일 정리 누락',
+    stable_key: "NOTICE-003",
+    featureName: "공지사항 수정",
+    status: "PARTIAL",
+    statusLabel: "부분구현",
+    linkedCode: "NoticeService.java:76",
+    summary: "첨부파일 교체 시 이전 파일 정리 누락",
   },
   {
-    stable_key: 'LOGIN-002',
-    featureName: '소셜 로그인',
-    status: 'NEED_CHECK',
-    statusLabel: '확인 필요',
-    linkedCode: 'OAuthService.java:18',
-    summary: '외부 인증 응답에 대한 근거 확인 필요',
+    stable_key: "LOGIN-002",
+    featureName: "소셜 로그인",
+    status: "NEED_CHECK",
+    statusLabel: "확인 필요",
+    linkedCode: "OAuthService.java:18",
+    summary: "외부 인증 응답에 대한 근거 확인 필요",
   },
   {
-    stable_key: 'LOGIN-003',
-    featureName: '회원가입',
-    status: 'MISMATCHED',
-    statusLabel: '불일치',
-    linkedCode: 'AuthService.java:42',
-    summary: '중복 이메일에 대한 안내가 없습니다.',
+    stable_key: "LOGIN-003",
+    featureName: "회원가입",
+    status: "MISMATCHED",
+    statusLabel: "불일치",
+    linkedCode: "AuthService.java:42",
+    summary: "중복 이메일에 대한 안내가 없습니다.",
   },
   {
-    stable_key: 'USER-001',
-    featureName: '프로필 변경',
-    status: 'UNIMPLEMENTED',
-    statusLabel: '미구현 후보',
-    linkedCode: '연결된 코드 없음',
-    summary: '분석 범위 안에서 관련 코드를 찾지 못함',
+    stable_key: "USER-001",
+    featureName: "프로필 변경",
+    status: "UNIMPLEMENTED",
+    statusLabel: "미구현 후보",
+    linkedCode: "연결된 코드 없음",
+    summary: "분석 범위 안에서 관련 코드를 찾지 못함",
   },
 ];
 
-const BASE_URL = 'http://127.0.0.1:8000/api/v2';
+const mapBackendStatusToFrontend = (
+  backendStatus: string,
+): VerificationStatus => {
+  switch (backendStatus) {
+    case "implemented":
+      return "IMPLEMENTED";
+    case "partial":
+      return "PARTIAL";
+    case "mismatch":
+      return "MISMATCHED";
+    case "not_found":
+      return "UNIMPLEMENTED";
+    case "needs_review":
+    case "not_statically_verifiable":
+      return "NEED_CHECK";
+    default:
+      return "NEED_CHECK";
+  }
+};
+
+const getStatusLabel = (status: string) => {
+  switch (status) {
+    case "IMPLEMENTED":
+      return "구현";
+    case "PARTIAL":
+      return "부분구현";
+    case "MISMATCHED":
+      return "불일치";
+    case "UNIMPLEMENTED":
+      return "미구현 후보";
+    case "NEED_CHECK":
+      return "확인 필요";
+    default:
+      return "상태 불명";
+  }
+};
 
 export const VerificationView: React.FC<VerificationViewProps> = ({
   onNavigateStep,
@@ -89,79 +136,112 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
 }) => {
   const { projectId } = useProject();
   const [selectedReqId, setSelectedReqId] = useState<string | null>(null);
-  const [projectSetup, setProjectSetup] = useState<ProjectSetupData | null>(setupData || null);
-  const [requirementsList, setRequirementsList] = useState<RequirementItem[]>(requirementsData || []);
+  const [projectSetup, setProjectSetup] = useState<ProjectSetupData | null>(
+    setupData || null,
+  );
+  const [requirementsList, setRequirementsList] = useState<RequirementItem[]>(
+    requirementsData || [],
+  );
   const [isVerified, setIsVerified] = useState<boolean>(false);
   const [tableData, setTableData] = useState<TraceabilityRow[]>([]);
-  const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('ALL');
+  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [selectedStatusFilter, setSelectedStatusFilter] =
+    useState<string>("ALL");
   const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [sourceData, setSourceData] = useState<any>(null);
+  const [sourceData, setSourceData] = useState<{ id?: string } | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
 
     const forceLoadData = async () => {
       try {
-        const [setupRes, reqRes, srcRes, verifyRes] = await Promise.all([
+        const [setupRes, reqRes, srcRes] = await Promise.all([
           fetchProjectSetup(projectId),
           fetchRequirements(projectId),
-          fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`).then(res => res.json()).catch(() => ({ items: [] })),
-          fetch(`${BASE_URL}/projects/${projectId}/verification/results`).then(res => res.json()).catch(() => ({ items: [] }))
+          fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`)
+            .then((res) => res.json())
+            .catch(() => ({ items: [] })),
         ]);
 
         if (setupRes) setProjectSetup(setupRes);
         if (reqRes) setRequirementsList(reqRes);
-        
+
         if (srcRes && srcRes.items && srcRes.items.length > 0) {
           setSourceData(srcRes.items[0]);
         } else {
           setSourceData(null);
         }
 
-        if (verifyRes && verifyRes.items && verifyRes.items.length > 0) {
-          const formattedData = verifyRes.items.map((item: any) => ({
-            stable_key: item.stable_key,
-            featureName: item.feature_name || '기능명 없음',
-            status: item.status,
-            statusLabel: getStatusLabel(item.status),
-            linkedCode: item.linked_code || '연결 코드 없음',
-            summary: item.summary || '요약 정보 없음'
-          }));
-          setTableData(formattedData);
-          setIsVerified(true);
+        const runs = await fetchVerificationRuns(projectId);
+        if (runs && runs.length > 0) {
+          const latestRunId = runs[0].id;
+
+          const verifyRes = await fetch(
+            `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/traceability`,
+          )
+            .then((res) => {
+              if (!res.ok) throw new Error("추적 데이터 로드 실패");
+              return res.json();
+            })
+            .catch(() => ({ items: [] }));
+
+          if (verifyRes && verifyRes.items && verifyRes.items.length > 0) {
+            const formattedData = verifyRes.items.map(
+              (item: Record<string, unknown>) => {
+                const statusStr =
+                  typeof item.analysis_state === "string"
+                    ? item.analysis_state
+                    : "";
+                const mappedStatus = mapBackendStatusToFrontend(statusStr);
+                const hasEvidence =
+                  typeof item.evidence_count === "number" &&
+                  item.evidence_count > 0;
+
+                return {
+                  stable_key: String(
+                    item.stable_key || item.requirement_id || "",
+                  ),
+                  featureName: String(item.title || "기능명 없음"),
+                  status: mappedStatus,
+                  statusLabel: getStatusLabel(mappedStatus),
+                  linkedCode: hasEvidence
+                    ? `${item.evidence_count}개 근거 발견`
+                    : "연결 코드 없음",
+                  summary: String(item.reason || "요약 정보 없음"),
+                };
+              },
+            );
+            setTableData(formattedData);
+            setIsVerified(true);
+          } else {
+            setIsVerified(false);
+          }
         } else {
           setIsVerified(false);
         }
       } catch (error) {
-        console.error('검증 초기 데이터 강제 로딩 에러:', error);
+        console.error("검증 초기 데이터 로딩 에러:", error);
       }
     };
 
     forceLoadData();
   }, [projectId]);
 
-  const getStatusLabel = (status: string) => {
-    switch (status) {
-      case 'IMPLEMENTED': return '구현';
-      case 'PARTIAL': return '부분구현';
-      case 'MISMATCHED': return '불일치';
-      case 'UNIMPLEMENTED': return '미구현 후보';
-      case 'NEED_CHECK': return '확인 필요';
-      default: return '상태 불명';
-    }
-  };
-
-const handleStartVerification = async () => {
+  const handleStartVerification = async () => {
     if (!projectId) return;
     setIsLoading(true);
 
     try {
-      const directCodeRes = await fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`);
+      const directCodeRes = await fetch(
+        `${BASE_URL}/projects/${projectId}/code/snapshots`,
+      );
+      if (!directCodeRes.ok) throw new Error("스냅샷 목록 조회 실패");
       const directCodeData = await directCodeRes.json();
-      
+
       if (!directCodeData.items || directCodeData.items.length === 0) {
-        alert('백엔드에 등록된 소스코드 스냅샷이 없습니다.\n1. 좌측 메뉴 [01 프로젝트 설정]으로 이동\n2. ZIP 파일 선택\n3. 화면 맨 아래 [명세 분석 시작]을 눌러 스냅샷을 생성해 주세요.');
+        alert(
+          "백엔드에 등록된 소스코드 스냅샷이 없습니다.\n좌측 메뉴 [01 프로젝트 설정]으로 이동\n2. ZIP 파일 선택\n3. 화면 맨 아래 [명세 분석 시작]을 눌러 스냅샷을 생성해 주세요.",
+        );
         setIsLoading(false);
         return;
       }
@@ -169,60 +249,121 @@ const handleStartVerification = async () => {
       const snapshotId = directCodeData.items[0].id;
       setSourceData(directCodeData.items[0]);
 
-      const reqsToVerify = requirementsList.filter(r => r.review_status === 'approved');
+      const reqsToVerify = requirementsList.filter(
+        (r) => r.review_status === "approved",
+      );
 
       if (reqsToVerify.length === 0) {
-        alert('검토 확정(approved)된 요구사항이 한 건도 없습니다. 이전 화면에서 요구사항을 먼저 확정해 주세요.');
+        alert(
+          "검토 확정(approved)된 요구사항이 한 건도 없습니다. 이전 화면에서 요구사항을 먼저 확정해 주세요.",
+        );
         setIsLoading(false);
         return;
       }
 
-      const verifyRes = await fetch(`${BASE_URL}/projects/${projectId}/verification-runs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          snapshot_id: snapshotId,
-          requirement_versions: reqsToVerify.map(r => ({ requirement_id: r.id, revision: (r as any).revision || 1 })),
-          model_config_version: 0
-        })
-      });
+      const verifyRes = await fetch(
+        `${BASE_URL}/projects/${projectId}/verification-runs`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            snapshot_id: snapshotId,
+            requirement_versions: reqsToVerify.map((r) => {
+              const req = r as RequirementItem & { revision?: number };
+              return {
+                requirement_id: req.id,
+                revision: typeof req.revision === "number" ? req.revision : 1,
+              };
+            }),
+            model_config_version: 0,
+          }),
+        },
+      );
+
+      if (!verifyRes.ok) {
+        throw new Error("검증 런 생성 요청이 거부되었습니다.");
+      }
 
       const verifyJob = await verifyRes.json();
 
-      if (verifyJob.status === 'blocked' || verifyJob.status === 'failed') {
-        alert(`[백엔드 검증 차단됨]\n사유: ${verifyJob.missing_features?.[0]?.message || 'AI 모델 어댑터 미연결'}\n\n코드 검증은 AI 모델이 필수적이므로 더 이상 진행할 수 없습니다.`);
+      if (verifyJob.status === "blocked" || verifyJob.status === "failed") {
+        alert(
+          `[백엔드 검증 차단됨]\n사유: ${verifyJob.missing_features?.[0]?.message || "AI 모델 어댑터 미연결"}\n\n코드 검증은 AI 모델이 필수적이므로 더 이상 진행할 수 없습니다.`,
+        );
         setIsLoading(false);
         return;
       }
 
       if (verifyJob.id) {
-        console.log('AI 코드 검증 백그라운드 작업 시작, 폴링 대기 중...');
-        
-        await pollJobStatus(projectId, verifyJob.id, (jobInfo) => {
-          if (jobInfo.progress) {
-            console.log(`검증 진행 중... 단계: ${jobInfo.progress.stage}`);
-          }
-        });
+        console.log("AI 코드 검증 백그라운드 작업 시작, 폴링 대기 중...");
 
-        alert('AI 코드 검증이 완료되었습니다.');
-        
-        const verifyResReload = await fetch(`${BASE_URL}/projects/${projectId}/verification/results`).then(res => res.json()).catch(() => ({ items: [] }));
-        if (verifyResReload && verifyResReload.items && verifyResReload.items.length > 0) {
-          const formattedData = verifyResReload.items.map((item: any) => ({
-            stable_key: item.stable_key,
-            featureName: item.feature_name || '기능명 없음',
-            status: item.status,
-            statusLabel: getStatusLabel(item.status),
-            linkedCode: item.linked_code || '연결 코드 없음',
-            summary: item.summary || '요약 정보 없음'
-          }));
-          setTableData(formattedData);
-          setIsVerified(true);
+        const finalJob = (await pollJobStatus(
+          projectId,
+          verifyJob.id,
+          (jobInfo: { progress?: { stage: string } }) => {
+            if (jobInfo.progress) {
+              console.log(`검증 진행 중... 단계: ${jobInfo.progress.stage}`);
+            }
+          },
+        )) as { status: string; error?: { message: string } };
+
+        if (["failed", "blocked", "cancelled"].includes(finalJob.status)) {
+          alert(
+            `[검증 실패]\n상태: ${finalJob.status}\n서버에서 코드 검증을 완료하지 못했습니다.`,
+          );
+          setIsLoading(false);
+          return;
+        }
+
+        alert("AI 코드 검증이 성공적으로 완료되었습니다.");
+
+        const runsAfterPoll = await fetchVerificationRuns(projectId);
+        if (runsAfterPoll && runsAfterPoll.length > 0) {
+          const latestRunId = runsAfterPoll[0].id;
+          const verifyResReload = await fetch(
+            `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/traceability`,
+          )
+            .then((res) => res.json())
+            .catch(() => ({ items: [] }));
+
+          if (
+            verifyResReload &&
+            verifyResReload.items &&
+            verifyResReload.items.length > 0
+          ) {
+            const formattedData = verifyResReload.items.map(
+              (item: Record<string, unknown>) => {
+                const statusStr =
+                  typeof item.analysis_state === "string"
+                    ? item.analysis_state
+                    : "";
+                const mappedStatus = mapBackendStatusToFrontend(statusStr);
+                const hasEvidence =
+                  typeof item.evidence_count === "number" &&
+                  item.evidence_count > 0;
+
+                return {
+                  stable_key: String(
+                    item.stable_key || item.requirement_id || "",
+                  ),
+                  featureName: String(item.title || "기능명 없음"),
+                  status: mappedStatus,
+                  statusLabel: getStatusLabel(mappedStatus),
+                  linkedCode: hasEvidence
+                    ? `${item.evidence_count}개 근거 발견`
+                    : "연결 코드 없음",
+                  summary: String(item.reason || "요약 정보 없음"),
+                };
+              },
+            );
+            setTableData(formattedData);
+            setIsVerified(true);
+          }
         }
       }
     } catch (error) {
       console.error(error);
-      alert('검증 요청 중 통신 오류가 발생했습니다.');
+      alert("검증 요청 중 통신 오류가 발생했습니다.");
     } finally {
       setIsLoading(false);
     }
@@ -239,23 +380,24 @@ const handleStartVerification = async () => {
   };
 
   const confirmedRequirementsCount = useMemo(() => {
-    return requirementsList.filter(
-      (r) => r.review_status === 'approved'
-    ).length;
+    return requirementsList.filter((r) => r.review_status === "approved")
+      .length;
   }, [requirementsList]);
 
-  const requirementStatusText = confirmedRequirementsCount > 0 ? '검토 완료' : '검토 필요';
+  const requirementStatusText =
+    confirmedRequirementsCount > 0 ? "검토 완료" : "검토 필요";
   const requirementCountText = `확정 ${confirmedRequirementsCount || requirementsList.length}개`;
 
   const isSourceConnected = !!sourceData?.id;
-  const sourceSnapshotId = sourceData?.id || '스냅샷 미지정';
-  const sourceStatusText = isSourceConnected ? '연결됨' : '보류';
+  const sourceSnapshotId = sourceData?.id || "스냅샷 미지정";
+  const sourceStatusText = isSourceConnected ? "연결됨" : "보류";
 
-  const verificationRunStatus = isVerified ? '실행 완료' : '미실행';
-  const verificationAnalysisStatus = isVerified ? '분석 완료' : '미분석';
+  const verificationRunStatus = isVerified ? "실행 완료" : "미실행";
+  const verificationAnalysisStatus = isVerified ? "분석 완료" : "미분석";
 
-  const specVersionLabel = projectSetup?.specDocument?.version || 'v0.2';
-  const snapshotLabel = sourceData?.id || 'S-014';
+  // 타입 오류 수정: specDocument 대신 specFile 접근
+  const specVersionLabel = projectSetup?.specFile?.version || "v0.2";
+  const snapshotLabel = sourceData?.id || "S-014";
 
   const filteredData = useMemo(() => {
     return tableData.filter((row) => {
@@ -264,19 +406,26 @@ const handleStartVerification = async () => {
         row.featureName.toLowerCase().includes(searchQuery.toLowerCase()) ||
         row.linkedCode.toLowerCase().includes(searchQuery.toLowerCase());
       const matchStatus =
-        selectedStatusFilter === 'ALL' || row.status === selectedStatusFilter;
+        selectedStatusFilter === "ALL" || row.status === selectedStatusFilter;
       return matchSearch && matchStatus;
     });
   }, [tableData, searchQuery, selectedStatusFilter]);
 
   const stats = useMemo(() => {
-    const implemented = tableData.filter((r) => r.status === 'IMPLEMENTED').length;
-    const partial = tableData.filter((r) => r.status === 'PARTIAL').length;
-    const mismatched = tableData.filter((r) => r.status === 'MISMATCHED').length;
-    const unimplemented = tableData.filter((r) => r.status === 'UNIMPLEMENTED').length;
-    const needCheck = tableData.filter((r) => r.status === 'NEED_CHECK').length;
+    const implemented = tableData.filter(
+      (r) => r.status === "IMPLEMENTED",
+    ).length;
+    const partial = tableData.filter((r) => r.status === "PARTIAL").length;
+    const mismatched = tableData.filter(
+      (r) => r.status === "MISMATCHED",
+    ).length;
+    const unimplemented = tableData.filter(
+      (r) => r.status === "UNIMPLEMENTED",
+    ).length;
+    const needCheck = tableData.filter((r) => r.status === "NEED_CHECK").length;
     const total = tableData.length;
-    const matchPercentage = total > 0 ? ((implemented / total) * 100).toFixed(1) : '0.0';
+    const matchPercentage =
+      total > 0 ? ((implemented / total) * 100).toFixed(1) : "0.0";
 
     return {
       implemented,
@@ -291,7 +440,7 @@ const handleStartVerification = async () => {
 
   if (selectedReqId) {
     return (
-      <VerificationDetail 
+      <VerificationDetail
         requirementId={selectedReqId}
         onBack={() => setSelectedReqId(null)}
         onNavigateStep={(step) => {
@@ -306,7 +455,7 @@ const handleStartVerification = async () => {
 
   if (!isVerified) {
     return (
-      <div className="max-w-[1180px] mx-auto py-2 px-2 md:px-4 space-y-4">
+      <div className="max-w-6xl mx-auto py-2 px-2 md:px-4 space-y-4">
         <PageHeader
           stepTag="03 / VERIFICATION RESULTS"
           title="검증 결과를 아직 만들지 못했습니다."
@@ -330,7 +479,9 @@ const handleStartVerification = async () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-4 space-y-1.5">
               <span className="text-xs font-bold text-slate-800">요구사항</span>
-              <div className="text-xs text-slate-600">{requirementCountText}</div>
+              <div className="text-xs text-slate-600">
+                {requirementCountText}
+              </div>
               <div className="pt-1">
                 <StatusBadge status={requirementStatusText} />
               </div>
@@ -338,15 +489,23 @@ const handleStartVerification = async () => {
 
             <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-4 space-y-1.5">
               <span className="text-xs font-bold text-slate-800">소스코드</span>
-              <div className="text-xs text-slate-600 truncate">{sourceSnapshotId}</div>
+              <div className="text-xs text-slate-600 truncate">
+                {sourceSnapshotId}
+              </div>
               <div className="pt-1">
-                <StatusBadge status={sourceStatusText === '연결됨' ? '완료' : '보류'} />
+                <StatusBadge
+                  status={sourceStatusText === "연결됨" ? "완료" : "보류"}
+                />
               </div>
             </div>
 
             <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-4 space-y-1.5">
-              <span className="text-xs font-bold text-slate-800">검증 결과</span>
-              <div className="text-xs text-slate-600">{verificationRunStatus}</div>
+              <span className="text-xs font-bold text-slate-800">
+                검증 결과
+              </span>
+              <div className="text-xs text-slate-600">
+                {verificationRunStatus}
+              </div>
               <div className="pt-1">
                 <span className="text-[10px] text-slate-400">
                   {verificationAnalysisStatus}
@@ -365,7 +524,7 @@ const handleStartVerification = async () => {
                 type="button"
                 variant="primary"
                 size="md"
-                onClick={() => onNavigateStep('SETUP')}
+                onClick={() => onNavigateStep("SETUP")}
               >
                 연결 설정 확인
               </Button>
@@ -373,7 +532,7 @@ const handleStartVerification = async () => {
                 type="button"
                 variant="secondary"
                 size="md"
-                onClick={() => onNavigateStep('ANALYSIS')}
+                onClick={() => onNavigateStep("ANALYSIS")}
               >
                 요구사항 확인
               </Button>
@@ -384,7 +543,7 @@ const handleStartVerification = async () => {
                 className="bg-blue-600 text-white"
                 onClick={handleStartVerification}
               >
-                {isLoading ? '검증 분석 중...' : '다시 검증 (AI 요청)'}
+                {isLoading ? "검증 분석 중..." : "다시 검증 (AI 요청)"}
               </Button>
             </div>
 
@@ -404,7 +563,7 @@ const handleStartVerification = async () => {
   }
 
   return (
-    <div className="max-w-[1180px] mx-auto py-2 px-2 md:px-4 space-y-4">
+    <div className="max-w-6xl mx-auto py-2 px-2 md:px-4 space-y-4">
       <PageHeader
         stepTag="03 / VERIFICATION RESULTS"
         title="검증 결과"
@@ -418,7 +577,7 @@ const handleStartVerification = async () => {
               if (onSelectRequirementForTest && tableData.length > 0) {
                 onSelectRequirementForTest(tableData[0].stable_key);
               }
-              onNavigateStep('TEST_SPEC');
+              onNavigateStep("TEST_SPEC");
             }}
             className="whitespace-nowrap"
           >
@@ -430,31 +589,45 @@ const handleStartVerification = async () => {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
           <div className="text-[11px] text-slate-500">구현</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">{stats.implemented}</div>
+          <div className="text-2xl font-bold text-slate-900 mt-1">
+            {stats.implemented}
+          </div>
           <div className="text-[10px] text-slate-400 mt-1">명세와 일치</div>
         </div>
 
         <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
           <div className="text-[11px] text-slate-500">부분구현</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">{stats.partial}</div>
+          <div className="text-2xl font-bold text-slate-900 mt-1">
+            {stats.partial}
+          </div>
           <div className="text-[10px] text-slate-400 mt-1">일부 조건 누락</div>
         </div>
 
         <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
           <div className="text-[11px] text-slate-500">불일치</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">{stats.mismatched}</div>
-          <div className="text-[10px] text-slate-400 mt-1">명세와 코드 상충</div>
+          <div className="text-2xl font-bold text-slate-900 mt-1">
+            {stats.mismatched}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-1">
+            명세와 코드 상충
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
           <div className="text-[11px] text-slate-500">미구현 후보</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">{stats.unimplemented}</div>
-          <div className="text-[10px] text-slate-400 mt-1">연결 코드 미발견</div>
+          <div className="text-2xl font-bold text-slate-900 mt-1">
+            {stats.unimplemented}
+          </div>
+          <div className="text-[10px] text-slate-400 mt-1">
+            연결 코드 미발견
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm col-span-2 sm:col-span-1">
           <div className="text-[11px] text-slate-500">확인 필요</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">{stats.needCheck}</div>
+          <div className="text-2xl font-bold text-slate-900 mt-1">
+            {stats.needCheck}
+          </div>
           <div className="text-[10px] text-slate-400 mt-1">근거 추가 검토</div>
         </div>
       </div>
@@ -462,7 +635,9 @@ const handleStartVerification = async () => {
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-bold text-slate-900">요구사항 추적표</h2>
+            <h2 className="text-sm font-bold text-slate-900">
+              요구사항 추적표
+            </h2>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
@@ -507,7 +682,10 @@ const handleStartVerification = async () => {
             </thead>
             <tbody className="divide-y divide-slate-100 text-xs">
               {filteredData.map((row) => (
-                <tr key={row.stable_key} className="hover:bg-slate-50/60 transition-colors">
+                <tr
+                  key={row.stable_key}
+                  className="hover:bg-slate-50/60 transition-colors"
+                >
                   <td className="py-3 px-4 font-mono font-bold text-blue-600">
                     {row.stable_key}
                   </td>
@@ -526,7 +704,6 @@ const handleStartVerification = async () => {
                   <td className="py-3 px-4 text-right">
                     <button
                       type="button"
-                      // 수정: 단계 이동 대신 상태 업데이트로 상세 뷰 전환
                       onClick={() => setSelectedReqId(row.stable_key)}
                       className="text-[11px] font-medium text-slate-500 hover:text-blue-600 transition-colors"
                     >
@@ -541,10 +718,12 @@ const handleStartVerification = async () => {
 
         <div className="p-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
           <div>
-            분석 기준: 명세 {specVersionLabel} · 코드 {snapshotLabel} | 명세나 코드가 바뀌면 다시 검증하세요.
+            분석 기준: 명세 {specVersionLabel} · 코드 {snapshotLabel} | 명세나
+            코드가 바뀌면 다시 검증하세요.
           </div>
           <div>
-            전체 {stats.total}개 · 명세 완전 일치 {stats.implemented}/{stats.total} ({stats.matchPercentage}%)
+            전체 {stats.total}개 · 명세 완전 일치 {stats.implemented}/
+            {stats.total} ({stats.matchPercentage}%)
           </div>
         </div>
       </div>
@@ -554,7 +733,7 @@ const handleStartVerification = async () => {
           type="button"
           variant="secondary"
           size="md"
-          onClick={() => onNavigateStep('ANALYSIS')}
+          onClick={() => onNavigateStep("ANALYSIS")}
         >
           명세 다시 검토
         </Button>

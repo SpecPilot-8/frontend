@@ -1,5 +1,6 @@
-import { createContext, useContext, useState } from 'react';
-import type { ReactNode } from 'react';
+/* eslint-disable react-refresh/only-export-components */
+import { createContext, useContext, useState } from "react";
+import type { ReactNode } from "react";
 
 interface ProjectContextType {
   projectId: string | null;
@@ -21,7 +22,7 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
 export const useProject = () => {
   const context = useContext(ProjectContext);
   if (context === undefined) {
-    throw new Error('useProject는 ProjectProvider 안에서만 사용해야 합니다.');
+    throw new Error("useProject는 ProjectProvider 안에서만 사용해야 합니다.");
   }
   return context;
 };

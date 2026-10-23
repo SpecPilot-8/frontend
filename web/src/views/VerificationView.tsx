@@ -14,6 +14,7 @@ import {
   fetchProjectSetup,
   pollJobStatus,
   fetchVerificationRuns,
+  isMockMode,
   BASE_URL,
 } from "../services/api";
 
@@ -32,6 +33,7 @@ export type VerificationStatus =
   | "NEED_CHECK";
 
 export interface TraceabilityRow {
+  requirement_id: string;
   stable_key: string;
   featureName: string;
   status: VerificationStatus;
@@ -39,57 +41,6 @@ export interface TraceabilityRow {
   linkedCode: string;
   summary: string;
 }
-
-const mockTraceabilityRows: TraceabilityRow[] = [
-  {
-    stable_key: "NOTICE-001",
-    featureName: "공지사항 목록 조회",
-    status: "IMPLEMENTED",
-    statusLabel: "구현",
-    linkedCode: "NoticeQueryService.java:22",
-    summary: "조회 조건과 응답 구조가 일치합니다.",
-  },
-  {
-    stable_key: "NOTICE-002",
-    featureName: "공지사항 작성",
-    status: "MISMATCHED",
-    statusLabel: "불일치",
-    linkedCode: "NoticeService.java:34",
-    summary: "명세 300MB · 서버 제한 50MB",
-  },
-  {
-    stable_key: "NOTICE-003",
-    featureName: "공지사항 수정",
-    status: "PARTIAL",
-    statusLabel: "부분구현",
-    linkedCode: "NoticeService.java:76",
-    summary: "첨부파일 교체 시 이전 파일 정리 누락",
-  },
-  {
-    stable_key: "LOGIN-002",
-    featureName: "소셜 로그인",
-    status: "NEED_CHECK",
-    statusLabel: "확인 필요",
-    linkedCode: "OAuthService.java:18",
-    summary: "외부 인증 응답에 대한 근거 확인 필요",
-  },
-  {
-    stable_key: "LOGIN-003",
-    featureName: "회원가입",
-    status: "MISMATCHED",
-    statusLabel: "불일치",
-    linkedCode: "AuthService.java:42",
-    summary: "중복 이메일에 대한 안내가 없습니다.",
-  },
-  {
-    stable_key: "USER-001",
-    featureName: "프로필 변경",
-    status: "UNIMPLEMENTED",
-    statusLabel: "미구현 후보",
-    linkedCode: "연결된 코드 없음",
-    summary: "분석 범위 안에서 관련 코드를 찾지 못함",
-  },
-];
 
 const mapBackendStatusToFrontend = (
   backendStatus: string,
@@ -188,19 +139,16 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
           if (verifyRes && verifyRes.items && verifyRes.items.length > 0) {
             const formattedData = verifyRes.items.map(
               (item: Record<string, unknown>) => {
-                const statusStr =
-                  typeof item.analysis_state === "string"
-                    ? item.analysis_state
-                    : "";
-                const mappedStatus = mapBackendStatusToFrontend(statusStr);
+                // [status가 없을 경우 null 처리 방어 및 정확한 매핑 적용
+                const backendStatus = String(item.status || "");
+                const mappedStatus = mapBackendStatusToFrontend(backendStatus);
                 const hasEvidence =
                   typeof item.evidence_count === "number" &&
                   item.evidence_count > 0;
 
                 return {
-                  stable_key: String(
-                    item.stable_key || item.requirement_id || "",
-                  ),
+                  requirement_id: String(item.requirement_id || ""),
+                  stable_key: String(item.stable_key || ""),
                   featureName: String(item.title || "기능명 없음"),
                   status: mappedStatus,
                   statusLabel: getStatusLabel(mappedStatus),
@@ -229,6 +177,11 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
 
   const handleStartVerification = async () => {
     if (!projectId) return;
+    if (isMockMode) {
+      alert("현재 목업 모드입니다. 실제 검증을 위해 목업 모드를 해제해 주세요.");
+      return;
+    }
+    
     setIsLoading(true);
 
     try {
@@ -254,9 +207,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
       );
 
       if (reqsToVerify.length === 0) {
-        alert(
-          "검토 확정(approved)된 요구사항이 한 건도 없습니다. 이전 화면에서 요구사항을 먼저 확정해 주세요.",
-        );
+        alert("검토 확정(approved)된 요구사항이 한 건도 없습니다. 이전 화면에서 요구사항을 먼저 확정해 주세요.");
         setIsLoading(false);
         return;
       }
@@ -287,16 +238,12 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
       const verifyJob = await verifyRes.json();
 
       if (verifyJob.status === "blocked" || verifyJob.status === "failed") {
-        alert(
-          `[백엔드 검증 차단됨]\n사유: ${verifyJob.missing_features?.[0]?.message || "AI 모델 어댑터 미연결"}\n\n코드 검증은 AI 모델이 필수적이므로 더 이상 진행할 수 없습니다.`,
-        );
+        alert(`[백엔드 검증 차단됨]\n사유: ${verifyJob.missing_features?.[0]?.message || "AI 모델 어댑터 미연결"}\n\n코드 검증은 AI 모델이 필수적이므로 더 이상 진행할 수 없습니다.`);
         setIsLoading(false);
         return;
       }
 
       if (verifyJob.id) {
-        console.log("AI 코드 검증 백그라운드 작업 시작, 폴링 대기 중...");
-
         const finalJob = (await pollJobStatus(
           projectId,
           verifyJob.id,
@@ -308,9 +255,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
         )) as { status: string; error?: { message: string } };
 
         if (["failed", "blocked", "cancelled"].includes(finalJob.status)) {
-          alert(
-            `[검증 실패]\n상태: ${finalJob.status}\n서버에서 코드 검증을 완료하지 못했습니다.`,
-          );
+          alert(`[검증 실패]\n상태: ${finalJob.status}\n서버에서 코드 검증을 완료하지 못했습니다.`);
           setIsLoading(false);
           return;
         }
@@ -333,19 +278,15 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
           ) {
             const formattedData = verifyResReload.items.map(
               (item: Record<string, unknown>) => {
-                const statusStr =
-                  typeof item.analysis_state === "string"
-                    ? item.analysis_state
-                    : "";
-                const mappedStatus = mapBackendStatusToFrontend(statusStr);
+                const backendStatus = String(item.status || "");
+                const mappedStatus = mapBackendStatusToFrontend(backendStatus);
                 const hasEvidence =
                   typeof item.evidence_count === "number" &&
                   item.evidence_count > 0;
 
                 return {
-                  stable_key: String(
-                    item.stable_key || item.requirement_id || "",
-                  ),
+                  requirement_id: String(item.requirement_id || ""),
+                  stable_key: String(item.stable_key || ""),
                   featureName: String(item.title || "기능명 없음"),
                   status: mappedStatus,
                   statusLabel: getStatusLabel(mappedStatus),
@@ -369,23 +310,11 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
     }
   };
 
-  const handleToggleMockView = () => {
-    if (!isVerified) {
-      setTableData(mockTraceabilityRows);
-      setIsVerified(true);
-    } else {
-      setTableData([]);
-      setIsVerified(false);
-    }
-  };
-
   const confirmedRequirementsCount = useMemo(() => {
-    return requirementsList.filter((r) => r.review_status === "approved")
-      .length;
+    return requirementsList.filter((r) => r.review_status === "approved").length;
   }, [requirementsList]);
 
-  const requirementStatusText =
-    confirmedRequirementsCount > 0 ? "검토 완료" : "검토 필요";
+  const requirementStatusText = confirmedRequirementsCount > 0 ? "검토 완료" : "검토 필요";
   const requirementCountText = `확정 ${confirmedRequirementsCount || requirementsList.length}개`;
 
   const isSourceConnected = !!sourceData?.id;
@@ -395,7 +324,6 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
   const verificationRunStatus = isVerified ? "실행 완료" : "미실행";
   const verificationAnalysisStatus = isVerified ? "분석 완료" : "미분석";
 
-  // 타입 오류 수정: specDocument 대신 specFile 접근
   const specVersionLabel = projectSetup?.specFile?.version || "v0.2";
   const snapshotLabel = sourceData?.id || "S-014";
 
@@ -412,30 +340,15 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
   }, [tableData, searchQuery, selectedStatusFilter]);
 
   const stats = useMemo(() => {
-    const implemented = tableData.filter(
-      (r) => r.status === "IMPLEMENTED",
-    ).length;
+    const implemented = tableData.filter((r) => r.status === "IMPLEMENTED").length;
     const partial = tableData.filter((r) => r.status === "PARTIAL").length;
-    const mismatched = tableData.filter(
-      (r) => r.status === "MISMATCHED",
-    ).length;
-    const unimplemented = tableData.filter(
-      (r) => r.status === "UNIMPLEMENTED",
-    ).length;
+    const mismatched = tableData.filter((r) => r.status === "MISMATCHED").length;
+    const unimplemented = tableData.filter((r) => r.status === "UNIMPLEMENTED").length;
     const needCheck = tableData.filter((r) => r.status === "NEED_CHECK").length;
     const total = tableData.length;
-    const matchPercentage =
-      total > 0 ? ((implemented / total) * 100).toFixed(1) : "0.0";
+    const matchPercentage = total > 0 ? ((implemented / total) * 100).toFixed(1) : "0.0";
 
-    return {
-      implemented,
-      partial,
-      mismatched,
-      unimplemented,
-      needCheck,
-      total,
-      matchPercentage,
-    };
+    return { implemented, partial, mismatched, unimplemented, needCheck, total, matchPercentage };
   }, [tableData]);
 
   if (selectedReqId) {
@@ -453,7 +366,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
     );
   }
 
-  if (!isVerified) {
+  if (!isVerified && !isMockMode) {
     return (
       <div className="max-w-6xl mx-auto py-2 px-2 md:px-4 space-y-4">
         <PageHeader
@@ -522,7 +435,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
             <div className="flex items-center space-x-2">
               <Button
                 type="button"
-                variant="primary"
+                variant="secondary"
                 size="md"
                 onClick={() => onNavigateStep("SETUP")}
               >
@@ -546,16 +459,6 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
                 {isLoading ? "검증 분석 중..." : "다시 검증 (AI 요청)"}
               </Button>
             </div>
-
-            <Button
-              type="button"
-              variant="ghost"
-              size="md"
-              onClick={handleToggleMockView}
-              className="bg-blue-50 text-blue-600 hover:bg-blue-100"
-            >
-              목업 결과 화면 확인
-            </Button>
           </div>
         </Card>
       </div>
@@ -608,9 +511,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
           <div className="text-2xl font-bold text-slate-900 mt-1">
             {stats.mismatched}
           </div>
-          <div className="text-[10px] text-slate-400 mt-1">
-            명세와 코드 상충
-          </div>
+          <div className="text-[10px] text-slate-400 mt-1">명세와 코드 상충</div>
         </div>
 
         <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
@@ -618,9 +519,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
           <div className="text-2xl font-bold text-slate-900 mt-1">
             {stats.unimplemented}
           </div>
-          <div className="text-[10px] text-slate-400 mt-1">
-            연결 코드 미발견
-          </div>
+          <div className="text-[10px] text-slate-400 mt-1">연결 코드 미발견</div>
         </div>
 
         <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm col-span-2 sm:col-span-1">
@@ -635,9 +534,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
       <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
         <div className="p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
           <div>
-            <h2 className="text-sm font-bold text-slate-900">
-              요구사항 추적표
-            </h2>
+            <h2 className="text-sm font-bold text-slate-900">요구사항 추적표</h2>
           </div>
 
           <div className="flex flex-wrap items-center gap-2.5">
@@ -704,7 +601,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
                   <td className="py-3 px-4 text-right">
                     <button
                       type="button"
-                      onClick={() => setSelectedReqId(row.stable_key)}
+                      onClick={() => setSelectedReqId(row.requirement_id)}
                       className="text-[11px] font-medium text-slate-500 hover:text-blue-600 transition-colors"
                     >
                       상세 보기
@@ -718,12 +615,10 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
 
         <div className="p-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
           <div>
-            분석 기준: 명세 {specVersionLabel} · 코드 {snapshotLabel} | 명세나
-            코드가 바뀌면 다시 검증하세요.
+            분석 기준: 명세 {specVersionLabel} · 코드 {snapshotLabel} | 명세나 코드가 바뀌면 다시 검증하세요.
           </div>
           <div>
-            전체 {stats.total}개 · 명세 완전 일치 {stats.implemented}/
-            {stats.total} ({stats.matchPercentage}%)
+            전체 {stats.total}개 · 명세 완전 일치 {stats.implemented}/{stats.total} ({stats.matchPercentage}%)
           </div>
         </div>
       </div>
@@ -739,14 +634,6 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
         </Button>
 
         <div className="flex items-center space-x-2">
-          <Button
-            type="button"
-            variant="ghost"
-            size="md"
-            onClick={handleToggleMockView}
-          >
-            미검증 상태로 전환
-          </Button>
           <Button
             type="button"
             variant="secondary"

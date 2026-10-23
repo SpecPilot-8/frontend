@@ -1,10 +1,15 @@
 import React, { useState, useEffect } from "react";
 import type { StepId, AIModelOption, ProjectSetupData } from "../types";
+import type { AIModelProfile } from "../types/project";
 import {
   fetchProjectSetup,
   saveProjectSetup,
   uploadDocument,
   pollJobStatus,
+  saveProjectCredentials,
+  updateProjectLLMConfig,
+  verifyLLMConnection,
+  isMockMode,
   BASE_URL,
 } from "../services/api";
 import { useProject } from "../contexts/ProjectContext";
@@ -17,13 +22,6 @@ interface SetupViewProps {
   onProjectUpdated?: (projectName: string) => void;
   initialData?: ProjectSetupData;
 }
-
-const DEFAULT_AI_MODELS: AIModelOption[] = [
-  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google" },
-  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "Google" },
-  { id: "gpt-4.1", name: "GPT-4.1", provider: "OpenAI" },
-  { id: "claude-sonnet-4.6", name: "Claude Sonnet 4.6", provider: "Anthropic" },
-];
 
 const generateSnapshotId = () => {
   return "UPLOAD-" + new Date().getTime().toString().slice(-4);
@@ -46,26 +44,27 @@ export const SetupView: React.FC<SetupViewProps> = ({
         techStack: "",
         analysisScope: "",
         aiConfig: {
-          modelId: DEFAULT_AI_MODELS[0].id,
+          modelId: "primary", 
           apiKey: "",
           isConnected: false,
+          configVersion: 0,
         },
       };
     }
     return null;
   });
 
-  const [aiModels, setAiModels] = useState<AIModelOption[]>(DEFAULT_AI_MODELS);
+  const [aiModels, setAiModels] = useState<AIModelOption[]>([]);
+  const [modelProfiles, setModelProfiles] = useState<AIModelProfile[]>([]);
   const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [codeSourceTab, setCodeSourceTab] = useState<"ZIP" | "GIT">("ZIP");
 
   const [connectionStatus, setConnectionStatus] = useState<
     "IDLE" | "CHECKING" | "SUCCESS" | "FAILED"
   >("IDLE");
+  const [connectionErrorMsg, setConnectionErrorMsg] = useState<string>("");
 
-  const [isLoading, setIsLoading] = useState<boolean>(
-    !!projectId && !initialData,
-  );
+  const [isLoading, setIsLoading] = useState<boolean>(!!projectId && !initialData);
   const [isSaving, setIsSaving] = useState<boolean>(false);
   const [savingMessage, setSavingMessage] = useState<string>("");
   const [isUploaded, setIsUploaded] = useState<boolean>(false);
@@ -74,20 +73,27 @@ export const SetupView: React.FC<SetupViewProps> = ({
   const [codeFile, setCodeFile] = useState<File | null>(null);
 
   useEffect(() => {
-    fetch(`${BASE_URL}/llm/models`)
-      .then((res) => (res.ok ? res.json() : null))
+    fetch(`${BASE_URL}/model-profiles`)
+      .then((res) => (res.ok ? res.json() : { items: [] }))
       .then((data) => {
         if (data && data.items && data.items.length > 0) {
+          setModelProfiles(data.items);
           setAiModels(
-            data.items.map((m: Record<string, unknown>) => ({
-              id: String(m.id || m.model_id || ""),
-              name: String(m.name || m.model_name || m.id || ""),
-              provider: String(m.provider || "Unknown"),
+            data.items.map((m: AIModelProfile) => ({
+              id: m.id,
+              name: m.display_name,
+              provider: m.provider,
+              enabled: m.enabled,
             }))
           );
+        } else {
+          setAiModels([{ id: "primary", name: "기본 모델 (연결 대기)", provider: "unconfigured", enabled: false }]);
         }
       })
-      .catch((err) => console.error(err));
+      .catch((err) => {
+        console.error("모델 목록 로드 실패:", err);
+        setAiModels([{ id: "primary", name: "기본 모델 (연결 대기)", provider: "unconfigured", enabled: false }]);
+      });
   }, []);
 
   const {
@@ -133,23 +139,22 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
     Promise.all([
       fetchProjectSetup(projectId),
-      fetch(`${BASE_URL}/projects/${projectId}/documents`)
-        .then((res) => res.json())
-        .catch(() => ({ items: [] })),
-      fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`)
-        .then((res) => res.json())
-        .catch(() => ({ items: [] })),
+      fetch(`${BASE_URL}/projects/${projectId}/documents`).then((res) => res.json()).catch(() => ({ items: [] })),
+      fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`).then((res) => res.json()).catch(() => ({ items: [] })),
+      fetch(`${BASE_URL}/projects/${projectId}/llm`).then((res) => res.json()).catch(() => ({ config_version: 0 })),
     ])
-      .then(([setup, docsData, codeData]) => {
+      .then(([setup, docsData, codeData, llmData]) => {
         if (!initialData) {
           const updatedSetup: ProjectSetupData = {
             projectName: setup?.projectName || "",
+            version: setup?.version || 1,
             techStack: setup?.techStack || "",
             analysisScope: setup?.analysisScope || "",
             aiConfig: {
-              modelId: setup?.aiConfig?.modelId || aiModels[0].id,
-              apiKey: setup?.aiConfig?.apiKey || "",
-              isConnected: setup?.aiConfig?.isConnected || false,
+              modelId: llmData?.profile_id || "primary",
+              apiKey: "",
+              isConnected: llmData?.connection_status === "connected",
+              configVersion: llmData?.config_version || 0,
             },
             specFile: setup?.specFile || null,
             codeSource: setup?.codeSource || null,
@@ -158,7 +163,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           if (docsData.items && docsData.items.length > 0) {
             const doc = docsData.items[0];
             updatedSetup.specFile = {
-              fileName: doc.name || "기존_업로드된_기획서.pdf",
+              fileName: doc.filename || "기존_업로드된_기획서.pdf",
               pageCount: 1,
               version: `v${doc.revision || 1}.0`,
             };
@@ -184,7 +189,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       .finally(() => {
         setIsLoading(false);
       });
-  }, [initialData, projectId, aiModels]);
+  }, [initialData, projectId]);
 
   const currentModel =
     aiModels.find((m) => m.id === setupData?.aiConfig.modelId) || aiModels[0];
@@ -203,7 +208,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
   const handleUpdateAiConfig = (
     key: keyof ProjectSetupData["aiConfig"],
-    value: string | boolean,
+    value: string | boolean | number,
   ) => {
     if (!setupData) return;
     setSetupData({
@@ -213,6 +218,10 @@ export const SetupView: React.FC<SetupViewProps> = ({
         [key]: value,
       },
     });
+    if (key === "modelId" || key === "apiKey") {
+      setConnectionStatus("IDLE");
+      setConnectionErrorMsg("");
+    }
   };
 
   const handleSaveAndUpload = async () => {
@@ -225,15 +234,12 @@ export const SetupView: React.FC<SetupViewProps> = ({
     setSavingMessage("프로젝트 설정을 저장하는 중...");
 
     try {
-      const baseVersion = Number((setupData as Record<string, unknown>).version) || 1;
-      const response = await saveProjectSetup(
-        setupData,
-        projectId || undefined,
-        baseVersion,
-      );
+      const baseVersion = setupData.version || 1;
+      const response = await saveProjectSetup(setupData, projectId || undefined, baseVersion);
 
       if (response.success && response.projectId) {
         const newProjectId = response.projectId;
+        handleUpdateField("version", baseVersion + 1);
 
         if (specFile) {
           setSavingMessage("명세 문서를 서버에 업로드하는 중...");
@@ -245,52 +251,37 @@ export const SetupView: React.FC<SetupViewProps> = ({
           const formData = new FormData();
           formData.append("file", codeFile);
 
-          const sourceRes = await fetch(
-            `${BASE_URL}/projects/${newProjectId}/code/sources`,
-            {
-              method: "POST",
-              body: formData,
-            },
-          );
+          const sourceRes = await fetch(`${BASE_URL}/projects/${newProjectId}/code/sources`, {
+            method: "POST",
+            body: formData,
+          });
 
           if (!sourceRes.ok) {
             const errData = await sourceRes.json().catch(() => ({}));
-            throw new Error(
-              errData.error?.message || "소스코드 업로드에 실패했습니다.",
-            );
+            throw new Error(errData.error?.message || "소스코드 업로드에 실패했습니다.");
           }
 
           const sourceResponseData = await sourceRes.json();
           
           if (sourceResponseData.source_id) {
             setSavingMessage("소스코드 구조 인덱싱을 요청하는 중...");
-            const indexRes = await fetch(
-              `${BASE_URL}/projects/${newProjectId}/code/index`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ source_id: sourceResponseData.source_id }),
-              },
-            );
+            const indexRes = await fetch(`${BASE_URL}/projects/${newProjectId}/code/index`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ source_id: sourceResponseData.source_id }),
+            });
 
-            if (!indexRes.ok) {
-              throw new Error("코드 인덱싱 요청 접수에 실패했습니다.");
-            }
+            if (!indexRes.ok) throw new Error("코드 인덱싱 요청 접수에 실패했습니다.");
 
             const indexJob = await indexRes.json();
             
-            // 폴링 대기 로직 추가
             if (indexJob.id) {
               const finalJob = (await pollJobStatus(
                 newProjectId,
                 indexJob.id,
-                (jobInfo: {
-                  progress?: { completed: number; total: number };
-                }) => {
+                (jobInfo: { progress?: { completed: number; total: number } }) => {
                   if (jobInfo.progress) {
-                    setSavingMessage(
-                      `소스코드 인덱싱 중... (${jobInfo.progress.completed}/${jobInfo.progress.total})`
-                    );
+                    setSavingMessage(`소스코드 인덱싱 중... (${jobInfo.progress.completed}/${jobInfo.progress.total})`);
                   } else {
                     setSavingMessage("소스코드 인덱싱 진행 중...");
                   }
@@ -326,6 +317,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       return;
     }
     setConnectionStatus("SUCCESS");
+    setConnectionErrorMsg("");
     handleUpdateAiConfig("isConnected", true);
     alert("[개발 모드] AI API 연결이 임시로 강제 통과되었습니다.");
   };
@@ -337,29 +329,46 @@ export const SetupView: React.FC<SetupViewProps> = ({
     }
 
     setConnectionStatus("CHECKING");
+    setConnectionErrorMsg("");
 
     try {
-      const res = await fetch(
-        `${BASE_URL}/projects/${projectId}/llm/connection-check`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ config_version: 0 }),
-        },
-      );
+      if (isMockMode) {
+        handleVerifyApiKeyMock();
+        return;
+      }
 
-      if (res.ok) {
+      const selectedProfile = modelProfiles.find((p) => p.id === setupData?.aiConfig.modelId);
+      let currentConfigVersion = setupData?.aiConfig.configVersion || 0;
+      let credentialRef: string | undefined;
+
+      if (selectedProfile?.credential_required && setupData?.aiConfig.apiKey) {
+        const credRes = await saveProjectCredentials(projectId, selectedProfile.id, setupData.aiConfig.apiKey);
+        credentialRef = credRes.credential_ref;
+      }
+
+      const llmRes = await updateProjectLLMConfig(projectId, setupData!.aiConfig.modelId, currentConfigVersion, credentialRef);
+      currentConfigVersion = llmRes.config_version || (currentConfigVersion + 1);
+      handleUpdateAiConfig("configVersion", currentConfigVersion);
+
+      const verifyRes = await verifyLLMConnection(projectId, currentConfigVersion);
+
+      if (verifyRes.status === "connected") {
         setConnectionStatus("SUCCESS");
         handleUpdateAiConfig("isConnected", true);
         alert("AI API 연결이 성공적으로 확인되었습니다.");
       } else {
-        const errorData = await res.json().catch(() => ({}));
-        console.warn(errorData);
-        setConnectionStatus("FAILED");
+        throw new Error("연결에 실패했습니다.");
       }
-    } catch (error) {
-      console.error(error);
+    } catch (error: unknown) {
+      console.error("AI 연결 확인 오류:", error);
       setConnectionStatus("FAILED");
+      
+      const err = error as { message?: string, missing_features?: { message: string }[] };
+      let errMsg = err.message || "연결 확인 중 오류가 발생했습니다.";
+      if (err.missing_features && err.missing_features.length > 0) {
+        errMsg = err.missing_features[0].message;
+      }
+      setConnectionErrorMsg(errMsg);
     }
   };
 
@@ -654,7 +663,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
                   <div className="px-2 py-1 text-[11px] text-slate-400 font-medium">
                     분석 모델 선택 · 한 번에 1개
                   </div>
-                  {aiModels.map((model) => {
+                  {aiModels.map((model: AIModelOption & { enabled?: boolean }) => {
                     const isSelected =
                       (setupData.aiConfig.modelId || currentModel?.id) ===
                       model.id;
@@ -662,18 +671,23 @@ export const SetupView: React.FC<SetupViewProps> = ({
                       <button
                         key={model.id}
                         type="button"
+                        disabled={!model.enabled}
                         onClick={() => {
                           handleUpdateAiConfig("modelId", model.id);
                           setIsDropdownOpen(false);
                         }}
                         className={`w-full px-3 py-2 text-left rounded-lg text-xs flex items-center justify-between transition-colors ${
-                          isSelected
-                            ? "bg-blue-50 text-blue-600 font-semibold"
-                            : "hover:bg-slate-50 text-slate-700"
+                          !model.enabled
+                            ? "opacity-50 cursor-not-allowed bg-slate-50 text-slate-400"
+                            : isSelected
+                              ? "bg-blue-50 text-blue-600 font-semibold"
+                              : "hover:bg-slate-50 text-slate-700"
                         }`}
                       >
                         <div>
-                          <div className="font-medium">{model.name}</div>
+                          <div className="font-medium">
+                            {model.name} {model.enabled === false && "(미지원)"}
+                          </div>
                           <div className="text-[10px] text-slate-400 font-normal">
                             {model.provider}
                           </div>
@@ -705,10 +719,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
               <Input
                 type="password"
                 value={setupData.aiConfig.apiKey || ""}
-                onChange={(e) => {
-                  handleUpdateAiConfig("apiKey", e.target.value);
-                  setConnectionStatus("IDLE");
-                }}
+                onChange={(e) => handleUpdateAiConfig("apiKey", e.target.value)}
                 placeholder="제공업체 API 키 입력"
                 className="tracking-wider"
               />
@@ -760,6 +771,13 @@ export const SetupView: React.FC<SetupViewProps> = ({
                   </Button>
                 </div>
               </div>
+              
+              {connectionStatus === "FAILED" && connectionErrorMsg && (
+                <div className="text-[11px] text-rose-600 bg-rose-50 p-2 rounded-lg mt-2 break-keep">
+                  <span className="font-semibold block mb-0.5">연결 에러</span>
+                  {connectionErrorMsg}
+                </div>
+              )}
             </div>
 
             <p className="text-[11px] text-slate-400 leading-relaxed pt-2 border-t border-slate-100">

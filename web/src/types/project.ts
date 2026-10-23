@@ -16,9 +16,21 @@ export interface CodeSourceInfo {
   [key: string]: unknown;
 }
 
+// 백엔드에서 내려오는 모델 프로필 타입
+export interface AIModelProfile {
+  id: string;
+  provider: string;
+  model: string;
+  display_name: string;
+  adapter_status: string;
+  enabled: boolean;
+  credential_required: boolean;
+}
+
 // 프로젝트 설정 전체 데이터
 export interface ProjectSetupData {
   projectName: string;
+  version?: number;
   specFile: SpecFileInfo | null;
   codeSource: CodeSourceInfo | null;
   techStack: string;
@@ -27,6 +39,7 @@ export interface ProjectSetupData {
     modelId: string;
     apiKey: string;
     isConnected: boolean;
+    configVersion?: number;
     [key: string]: unknown;
   };
   [key: string]: unknown;

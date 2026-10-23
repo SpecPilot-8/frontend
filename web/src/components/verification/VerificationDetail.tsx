@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { RequirementPanel } from "./RequirementPanel";
 import { Button } from "../common";
 import { useProject } from "../../contexts/ProjectContext";
-import { BASE_URL } from "../../services/api";
+import { isMockMode, BASE_URL } from "../../services/api";
 import type { Requirement } from "../../types/verification";
 import type { StepId } from "../../types";
 
@@ -29,9 +29,15 @@ interface CallFlowNode {
   evidence_ids?: string[];
 }
 
+interface ConditionVerdict {
+  condition_id: string;
+  status: string;
+}
+
 interface VerificationDetailData {
   status: string;
   reason: string;
+  condition_verdicts?: ConditionVerdict[];
   call_flow?: {
     nodes?: CallFlowNode[];
   };
@@ -49,7 +55,6 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
 }) => {
   const { projectId } = useProject();
   const [isLoading, setIsLoading] = useState(true);
-  const [isMockMode, setIsMockMode] = useState(false);
 
   const [requirement, setRequirement] = useState<Requirement | null>(null);
   const [verificationData, setVerificationData] =
@@ -97,64 +102,13 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
       }
     };
     fetchData();
-  }, [projectId, requirementId, isMockMode]);
+  }, [projectId, requirementId]);
 
   const toggleEvidence = (id: string) => {
     const newSet = new Set(openEvidenceIds);
     if (newSet.has(id)) newSet.delete(id);
     else newSet.add(id);
     setOpenEvidenceIds(newSet);
-  };
-
-  const handleToggleMock = () => {
-    setIsMockMode(!isMockMode);
-    if (!isMockMode) {
-      setRequirement({
-        stable_key: requirementId,
-        original_text:
-          "이미 가입된 이메일로 회원가입을 시도하면 중복 이메일 안내를 표시해야 한다.",
-        source_refs: [
-          {
-            block_id: "block-auth-1",
-            quote:
-              "이미 가입된 이메일로 회원가입을 시도하면 중복 이메일 안내를 표시해야 한다.",
-            location: { kind: "page", index: 4, bbox: [120, 340, 250, 40] },
-          },
-        ],
-      });
-      setVerificationData({
-        status: "mismatch",
-        reason: "중복 이메일에 대한 오류 안내가 누락되었습니다.",
-        call_flow: {
-          nodes: [
-            { id: "n1", label: "AuthController" },
-            { id: "n2", label: "AuthService" },
-            { id: "n3", label: "UserRepository" },
-          ],
-        },
-        evidence: [
-          {
-            id: "ev-mock-1",
-            file_path: "AuthService.java",
-            start_line: 42,
-            end_line: 45,
-            role: "problem",
-            explanation:
-              "중복 검사는 있지만 가입이 거절된 이유를 사용자에게 전달하지 않습니다.",
-            code_snippet:
-              "42  if (users.existsByEmail(email)) {\n43      throw new IllegalStateException();\n44  }",
-            suggested_code:
-              '42  if (users.existsByEmail(email)) {\n43      throw new IllegalStateException(\n44          "이미 가입된 이메일입니다.");\n45  }',
-          },
-        ],
-        counts: { files: 1, evidence_locations: 1 },
-      });
-      setOpenEvidenceIds(new Set(["ev-mock-1"]));
-      setIsLoading(false);
-    } else {
-      setRequirement(null);
-      setVerificationData(null);
-    }
   };
 
   if (isLoading && !isMockMode) {
@@ -173,21 +127,10 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
           <Button onClick={onBack} variant="outline" className="mr-2">
             목록으로 돌아가기
           </Button>
-          <Button onClick={handleToggleMock} variant="primary">
-            UI 테스트용 목업 열기
-          </Button>
         </div>
       </div>
     );
   }
-
-  const stats = {
-    input: 3,
-    navigation: 3,
-    businessLogic: 3,
-    data: 3,
-    errorMessage: 2,
-  };
 
   return (
     <div className="max-w-6xl mx-auto py-2 px-2 md:px-4 space-y-4">
@@ -202,17 +145,9 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
           <div className="h-4 w-px bg-slate-200"></div>
           <h2 className="text-lg font-bold text-slate-900">
             {requirement.stable_key} · 검증 상세
-            {isMockMode && (
-              <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded">
-                목업 모드
-              </span>
-            )}
           </h2>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={handleToggleMock} variant="outline" size="sm">
-            {isMockMode ? "실제 서버 데이터 호출" : "목업으로 강제 전환"}
-          </Button>
           <Button
             variant="primary"
             size="md"
@@ -225,7 +160,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
       </div>
 
       <div className="flex flex-col md:flex-row gap-6 items-start">
-        <RequirementPanel requirement={requirement} stats={stats} />
+        <RequirementPanel requirement={requirement} verificationData={verificationData} />
 
         <div className="flex-1 bg-white rounded-xl border border-slate-200/80 shadow-sm p-6 w-full">
           <div className="flex justify-between items-end mb-6 border-b border-slate-100 pb-4">
@@ -234,8 +169,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                 관련 호출 흐름 · 코드 근거
               </h3>
               <p className="text-[13px] text-slate-500">
-                파일·줄 번호별로 펼쳐 확인하세요. 목록이 길면 아래로 스크롤할 수
-                있습니다.
+                파일·줄 번호별로 펼쳐 확인하세요. 목록이 길면 아래로 스크롤할 수 있습니다.
               </p>
             </div>
             <div className="text-[12px] text-slate-400">

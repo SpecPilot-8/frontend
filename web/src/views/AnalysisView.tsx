@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import type { StepId, RequirementItem, Condition } from "../types";
-import { fetchRequirements, pollJobStatus, BASE_URL } from "../services/api";
+import { fetchRequirements, pollJobStatus, isMockMode, BASE_URL } from "../services/api";
 import { useProject } from "../contexts/ProjectContext";
 import {
   Button,
@@ -52,16 +52,13 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
         setRequirements(data);
         if (data.length > 0) {
           setRequirements((currentReqs) => {
-            const targetId =
-              typeof preserveId === "string" ? preserveId : selectedId;
+            const targetId = typeof preserveId === "string" ? preserveId : selectedId;
             const exists = currentReqs.find((r) => r.id === targetId);
 
             if (exists) {
               setSelectedId(exists.id);
             } else {
-              const defaultItem =
-                currentReqs.find((r) => r.stable_key === "NOTICE-002") ||
-                currentReqs[0];
+              const defaultItem = currentReqs[0];
               setSelectedId(defaultItem.id);
             }
             return currentReqs;
@@ -87,8 +84,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           if (!isMounted) return;
           setRequirements(data);
           if (data.length > 0) {
-            const defaultItem =
-              data.find((r) => r.stable_key === "NOTICE-002") || data[0];
+            const defaultItem = data[0];
             setSelectedId(defaultItem.id);
             setViewMode("VIEW");
           } else {
@@ -108,6 +104,11 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
 
   const handleStartAIAnalysis = async () => {
     if (!projectId) return;
+    if (isMockMode) {
+      alert("현재 목업 모드입니다. 실제 AI 분석을 위해 목업 모드를 해제해 주세요.");
+      return;
+    }
+
     setIsLoading(true);
     setPollingMessage("백엔드에 분석을 요청하는 중입니다...");
 
@@ -116,9 +117,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       if (!docRes.ok) throw new Error("문서 목록 조회 실패");
       const docData = await docRes.json();
       if (!docData.items || docData.items.length === 0) {
-        alert(
-          "백엔드에 등록된 기획서 문서가 없습니다. 프로젝트 설정에서 파일을 먼저 업로드하세요.",
-        );
+        alert("백엔드에 등록된 기획서 문서가 없습니다. 프로젝트 설정에서 파일을 먼저 업로드하세요.");
         setIsLoading(false);
         setPollingMessage("");
         return;
@@ -127,7 +126,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       const docId = docData.items[0].id;
       const docRev = docData.items[0].revision || 1;
 
-      // 문서 파싱 202 접수 및 완료 대기
       setPollingMessage("문서 구조를 파싱하고 있습니다...");
       const parseRes = await fetch(
         `${BASE_URL}/projects/${projectId}/documents/${docId}/parse`,
@@ -135,7 +133,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ document_revision: docRev }),
-        },
+        }
       );
       if (!parseRes.ok) throw new Error("문서 파싱 요청 실패");
 
@@ -144,28 +142,21 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
         const finalParseJob = (await pollJobStatus(
           projectId,
           parseJobInit.id,
-          (jobInfo: {
-            progress?: { stage: string; completed: number; total: number };
-          }) => {
+          (jobInfo: { progress?: { stage: string; completed: number; total: number } }) => {
             if (jobInfo.progress) {
-              setPollingMessage(
-                `문서 구조 파싱 중... (${jobInfo.progress.completed}/${jobInfo.progress.total})`,
-              );
+              setPollingMessage(`문서 구조 파싱 중... (${jobInfo.progress.completed}/${jobInfo.progress.total})`);
             }
-          },
+          }
         )) as { status: string; error?: { message: string } };
 
         if (["failed", "blocked", "cancelled"].includes(finalParseJob.status)) {
-          alert(
-            `[파싱 실패]\n상태: ${finalParseJob.status}\n서버에서 문서 파싱을 완료하지 못했습니다.`,
-          );
+          alert(`[파싱 실패]\n상태: ${finalParseJob.status}\n서버에서 문서 파싱을 완료하지 못했습니다.`);
           setIsLoading(false);
           setPollingMessage("");
           return;
         }
       }
 
-      // 요구사항 추출 202 접수 및 완료 대기 (파싱 완료 후 실행됨)
       setPollingMessage("AI 모델에 요구사항 추출을 요청했습니다...");
       const extRes = await fetch(
         `${BASE_URL}/projects/${projectId}/documents/${docId}/requirements/extract`,
@@ -177,44 +168,34 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
             model_config_version: 0,
             accept_warnings: true,
           }),
-        },
+        }
       );
 
       if (!extRes.ok) throw new Error("요구사항 추출 요청 실패");
       const extJob = await extRes.json();
 
       if (extJob.status === "blocked" || extJob.status === "failed") {
-        alert(
-          `[백엔드 분석 차단됨]\n사유: ${extJob.missing_features?.[0]?.message || "AI 모델 어댑터 미연결"}\n\n자동 분석이 불가능하므로 좌측 폼에서 요구사항을 수동으로 입력해 주세요.`,
-        );
+        alert(`[백엔드 분석 차단됨]\n사유: ${extJob.missing_features?.[0]?.message || "AI 모델 어댑터 미연결"}\n\n자동 분석이 불가능하므로 좌측 폼에서 요구사항을 수동으로 입력해 주세요.`);
         setIsLoading(false);
         setPollingMessage("");
         return;
       }
 
       if (extJob.id) {
-        setPollingMessage(
-          "AI가 기획서의 의미를 추출하고 있습니다. 잠시만 기다려주세요...",
-        );
+        setPollingMessage("AI가 기획서의 의미를 추출하고 있습니다. 잠시만 기다려주세요...");
 
         const finalExtJob = (await pollJobStatus(
           projectId,
           extJob.id,
-          (jobInfo: {
-            progress?: { stage: string; completed: number; total: number };
-          }) => {
+          (jobInfo: { progress?: { stage: string; completed: number; total: number } }) => {
             if (jobInfo.progress && jobInfo.progress.stage === "extracting") {
-              setPollingMessage(
-                `의미 추출 진행 중... (${jobInfo.progress.completed}/${jobInfo.progress.total})`,
-              );
+              setPollingMessage(`의미 추출 진행 중... (${jobInfo.progress.completed}/${jobInfo.progress.total})`);
             }
-          },
+          }
         )) as { status: string; error?: { message: string } };
 
         if (["failed", "blocked", "cancelled"].includes(finalExtJob.status)) {
-          alert(
-            `[분석 실패]\n사유: ${finalExtJob.error?.message || finalExtJob.status}`,
-          );
+          alert(`[분석 실패]\n사유: ${finalExtJob.error?.message || finalExtJob.status}`);
           setIsLoading(false);
           setPollingMessage("");
           return;
@@ -242,12 +223,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     );
   }, [requirements, searchQuery]);
 
-  const selectedReq =
-    requirements.find((r) => r.id === selectedId) || filteredRequirements[0];
-
-  const completedCount = requirements.filter(
-    (r) => r.review_status === "approved",
-  ).length;
+  const selectedReq = requirements.find((r) => r.id === selectedId) || filteredRequirements[0];
+  const completedCount = requirements.filter((r) => r.review_status === "approved").length;
 
   const handleStartEdit = () => {
     if (!selectedReq) return;
@@ -263,11 +240,11 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   };
 
   const handleStartAdd = () => {
-    setFormReqId(`NOTICE-00${requirements.length + 1}`);
+    setFormReqId(`REQ-${requirements.length + 1}`);
     setFormTitle("");
     setFormDesc("");
-    setFormLocation("문서 8페이지");
-    setFormActor("관리자");
+    setFormLocation("");
+    setFormActor("");
     setFormCondition("");
     setFormAction("");
     setFormExpected("");
@@ -278,16 +255,15 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     e.preventDefault();
 
     if (!projectId) {
-      alert(
-        "선택된 프로젝트가 없습니다. 브라우저를 새로고침하셨다면, 좌측 메뉴에서 프로젝트를 다시 선택한 뒤 진입해 주세요.",
-      );
+      alert("선택된 프로젝트가 없습니다. 브라우저를 새로고침하셨다면, 좌측 메뉴에서 프로젝트를 다시 선택한 뒤 진입해 주세요.");
       return;
     }
+    
+    // 빈 값 방어를 위한 명시적 프론트엔드 검증 강화
     if (!formTitle.trim()) {
       alert("기능 이름을 필수로 입력해 주세요.");
       return;
     }
-
     setIsLoading(true);
 
     try {
@@ -298,9 +274,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       const docRev = docData.items?.[0]?.revision || 1;
 
       if (viewMode === "EDIT" && selectedReq) {
-        const reqRevision =
-          (selectedReq as RequirementItem & { revision?: number }).revision ||
-          1;
+        const reqRevision = (selectedReq as RequirementItem & { revision?: number }).revision || 1;
         const patchRes = await fetch(
           `${BASE_URL}/projects/${projectId}/requirements/${selectedReq.id}`,
           {
@@ -313,14 +287,12 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
               action: formAction,
               expected: formExpected,
             }),
-          },
+          }
         );
 
         if (!patchRes.ok) {
           const errData = await patchRes.json().catch(() => ({}));
-          throw new Error(
-            errData.error?.message || "수정 요청이 거절되었습니다.",
-          );
+          throw new Error(errData.error?.message || "수정 요청이 거절되었습니다.");
         }
 
         await loadData(selectedReq.id);
@@ -336,17 +308,17 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
               document_id: docId,
               document_revision: docRev,
               title: formTitle,
-              original_text: formDesc || "입력된 원문 내용이 없습니다.",
-              condition: formCondition || "첨부파일 제한",
-              action: formAction || formTitle,
-              expected: formExpected || "목록으로 이동",
+              original_text: formDesc,
+              condition: formCondition,
+              action: formAction,
+              expected: formExpected,
               req_type: "functional",
               origin: "manual",
               author_reason: "수동 추가",
               conditions: [
                 {
                   stable_key: formReqId.trim() || `REQ-${Date.now()}`,
-                  text: formExpected || "기본 수락 조건",
+                  text: formExpected || formTitle,
                   category: "business_logic",
                   target: "unknown",
                   verifiable: "code",
@@ -354,14 +326,12 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                 },
               ],
             }),
-          },
+          }
         );
 
         if (!postRes.ok) {
           const errData = await postRes.json().catch(() => ({}));
-          throw new Error(
-            errData.error?.message || "등록 요청이 거절되었습니다.",
-          );
+          throw new Error(errData.error?.message || "등록 요청이 거절되었습니다.");
         }
 
         const newData = await postRes.json();
@@ -380,8 +350,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
     setIsLoading(true);
 
     try {
-      const reqRevision =
-        (selectedReq as RequirementItem & { revision?: number }).revision || 1;
+      const reqRevision = (selectedReq as RequirementItem & { revision?: number }).revision || 1;
       const response = await fetch(
         `${BASE_URL}/projects/${projectId}/requirements/${selectedReq.id}/review`,
         {
@@ -391,13 +360,10 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
             base_revision: reqRevision,
             status: "approved",
           }),
-        },
+        }
       );
 
-      if (!response.ok) {
-        throw new Error("검토 확정에 실패했습니다.");
-      }
-
+      if (!response.ok) throw new Error("검토 확정에 실패했습니다.");
       await loadData(selectedReq.id);
     } catch (error) {
       console.error(error);
@@ -407,13 +373,9 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
   };
 
   const handleGoToVerification = () => {
-    const hasApproved = requirements.some(
-      (req) => req.review_status === "approved",
-    );
+    const hasApproved = requirements.some((req) => req.review_status === "approved");
     if (!hasApproved) {
-      alert(
-        "검토가 완료(확정)된 요구사항이 최소 1개 이상 필요합니다.\n\n먼저 '검토 확정' 버튼을 눌러 승인해 주세요.",
-      );
+      alert("검토가 완료(확정)된 요구사항이 최소 1개 이상 필요합니다.\n\n먼저 '검토 확정' 버튼을 눌러 승인해 주세요.");
       return;
     }
     onNavigateStep("VERIFICATION");
@@ -424,31 +386,14 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
       <div className="max-w-6xl mx-auto py-12 flex flex-col items-center justify-center space-y-4">
         {pollingMessage && (
           <div className="flex items-center space-x-3 text-blue-600 font-semibold bg-blue-50/50 px-4 py-2 rounded-xl animate-pulse">
-            <svg
-              className="w-5 h-5 animate-spin"
-              fill="none"
-              viewBox="0 0 24 24"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              ></circle>
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-              ></path>
+            <svg className="w-5 h-5 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
             <span>{pollingMessage}</span>
           </div>
         )}
-        <div className="text-xs text-slate-400">
-          요구사항 데이터를 불러오고 있습니다...
-        </div>
+        <div className="text-xs text-slate-400">요구사항 데이터를 불러오고 있습니다...</div>
       </div>
     );
   }
@@ -463,9 +408,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
         />
 
         <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-4 text-xs">
-          <div className="font-semibold text-amber-800">
-            AI 분석 서비스에 연결하지 못했습니다.
-          </div>
+          <div className="font-semibold text-amber-800">AI 분석 서비스에 연결하지 못했습니다.</div>
           <div className="text-amber-700/90 text-[11px] mt-0.5">
             연결 상태를 확인하거나 요구사항을 직접 입력해 검토를 계속하세요.
           </div>
@@ -481,9 +424,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
               <form onSubmit={handleSubmitForm} className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="space-y-1.5">
-                    <label className={VIEW_HEADER.fieldLabel}>
-                      요구사항 ID
-                    </label>
+                    <label className={VIEW_HEADER.fieldLabel}>요구사항 ID</label>
                     <Input
                       type="text"
                       value={formReqId}
@@ -503,9 +444,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                 </div>
 
                 <div className="space-y-1.5">
-                  <label className={VIEW_HEADER.fieldLabel}>
-                    명세 원문 또는 요구사항 설명
-                  </label>
+                  <label className={VIEW_HEADER.fieldLabel}>명세 원문 또는 요구사항 설명</label>
                   <textarea
                     rows={4}
                     value={formDesc}
@@ -532,17 +471,10 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                 </div>
 
                 <div className="pt-2 flex items-center justify-between border-t border-slate-100">
-                  <span className="text-[11px] text-slate-400">
-                    수락 조건은 추가 후 편집할 수 있습니다.
-                  </span>
+                  <span className="text-[11px] text-slate-400">수락 조건은 추가 후 편집할 수 있습니다.</span>
                   <div className="flex items-center space-x-2">
                     {requirements.length > 0 && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="md"
-                        onClick={() => setViewMode("VIEW")}
-                      >
+                      <Button type="button" variant="secondary" size="md" onClick={() => setViewMode("VIEW")}>
                         취소
                       </Button>
                     )}
@@ -700,12 +632,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
             </div>
 
             <div className="pt-3 border-t border-slate-100 flex items-center justify-end space-x-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="md"
-                onClick={() => setViewMode("VIEW")}
-              >
+              <Button type="button" variant="secondary" size="md" onClick={() => setViewMode("VIEW")}>
                 취소
               </Button>
               <Button type="submit" variant="primary" size="lg">
@@ -726,29 +653,13 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
         description="원문에서 추출한 요구사항과 수락 조건을 확인하고 확정하세요."
         action={
           <>
-            <Button
-              type="button"
-              variant="ghost"
-              size="md"
-              onClick={handleRefreshData}
-            >
+            <Button type="button" variant="ghost" size="md" onClick={handleRefreshData}>
               데이터 새로고침
             </Button>
-            <Button
-              type="button"
-              variant="secondary"
-              size="md"
-              onClick={handleStartAdd}
-            >
+            <Button type="button" variant="secondary" size="md" onClick={handleStartAdd}>
               + 새 요구사항 등록
             </Button>
-            <Button
-              type="button"
-              variant="primary"
-              size="lg"
-              onClick={handleGoToVerification}
-              className="whitespace-nowrap"
-            >
+            <Button type="button" variant="primary" size="lg" onClick={handleGoToVerification} className="whitespace-nowrap">
               확정한 명세로 검증
             </Button>
           </>
@@ -762,8 +673,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
           <span>{specVersion}</span>
         </div>
         <div className="text-slate-400">
-          전체 {requirements.length}개 · 검토 완료{" "}
-          {completedCount || requirements.length}개
+          전체 {requirements.length}개 · 검토 완료 {completedCount || requirements.length}개
         </div>
       </div>
 
@@ -801,12 +711,8 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                           : "bg-white hover:bg-slate-50 border border-transparent text-slate-700"
                       }`}
                     >
-                      <div className="text-xs font-bold leading-tight">
-                        {item.stable_key}
-                      </div>
-                      <div className="text-xs font-medium text-slate-800 mt-1 truncate">
-                        {item.title}
-                      </div>
+                      <div className="text-xs font-bold leading-tight">{item.stable_key}</div>
+                      <div className="text-xs font-medium text-slate-800 mt-1 truncate">{item.title}</div>
                     </button>
                   );
                 })}
@@ -832,120 +738,80 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                       {selectedReq.stable_key} · {selectedReq.title}
                     </h2>
                     <p className="text-[11px] text-slate-400 mt-1">
-                      기능 유형 ·{" "}
-                      {selectedReq.req_type === "functional"
-                        ? "기능 요구사항"
-                        : "비기능 요구사항"}
+                      기능 유형 · {selectedReq.req_type === "functional" ? "기능 요구사항" : "비기능 요구사항"}
                     </p>
                   </div>
-                  <StatusBadge
-                    status={
-                      selectedReq.review_status === "approved"
-                        ? "검토 완료"
-                        : "검토 필요"
-                    }
-                  />
+                  <StatusBadge status={selectedReq.review_status === "approved" ? "검토 완료" : "검토 필요"} />
                 </div>
 
                 <div className="bg-slate-50 border border-slate-200/60 rounded-xl p-4 space-y-1">
-                  <span className="text-[11px] font-semibold text-slate-400 block">
-                    명세 원문
-                  </span>
+                  <span className="text-[11px] font-semibold text-slate-400 block">명세 원문</span>
                   <p className="text-xs text-slate-700 leading-relaxed font-normal">
-                    {selectedReq.original_text}
+                    {selectedReq.original_text || "원문이 없습니다."}
                   </p>
                 </div>
 
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-2.5">
                   <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-3">
-                    <span className="text-[10px] text-slate-400 block mb-0.5">
-                      기능/비기능
-                    </span>
+                    <span className="text-[10px] text-slate-400 block mb-0.5">기능/비기능</span>
                     <span className="text-xs font-semibold text-slate-800">
-                      {selectedReq.req_type === "functional"
-                        ? "기능 요구사항"
-                        : "비기능 요구사항"}
+                      {selectedReq.req_type === "functional" ? "기능 요구사항" : "비기능 요구사항"}
                     </span>
                   </div>
                   <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-3">
-                    <span className="text-[10px] text-slate-400 block mb-0.5">
-                      조건
-                    </span>
+                    <span className="text-[10px] text-slate-400 block mb-0.5">조건</span>
                     <span className="text-xs font-semibold text-slate-800 truncate block">
-                      {selectedReq.condition || "첨부파일 ≤ 300MB"}
+                      {selectedReq.condition || "미지정"}
                     </span>
                   </div>
                   <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-3">
-                    <span className="text-[10px] text-slate-400 block mb-0.5">
-                      동작
-                    </span>
+                    <span className="text-[10px] text-slate-400 block mb-0.5">동작</span>
                     <span className="text-xs font-semibold text-slate-800 truncate block">
-                      {selectedReq.action || "공지사항 등록"}
+                      {selectedReq.action || "미지정"}
                     </span>
                   </div>
                   <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-3">
-                    <span className="text-[10px] text-slate-400 block mb-0.5">
-                      기대 결과
-                    </span>
+                    <span className="text-[10px] text-slate-400 block mb-0.5">기대 결과</span>
                     <span className="text-xs font-semibold text-slate-800 truncate block">
-                      {selectedReq.expected || "목록으로 이동"}
+                      {selectedReq.expected || "미지정"}
                     </span>
                   </div>
                 </div>
 
                 <div className="space-y-2 pt-1">
                   <div className="flex items-center justify-between">
-                    <h3 className="text-xs font-bold text-slate-900">
-                      수락 조건
-                    </h3>
+                    <h3 className="text-xs font-bold text-slate-900">수락 조건</h3>
                     <span className="text-[11px] text-slate-400">
                       {selectedReq.conditions?.length ?? 0}개 항목
                     </span>
                   </div>
 
                   <div className="space-y-1.5">
-                    {(selectedReq.conditions || []).map(
-                      (ac: Condition, idx: number) => (
-                        <div
-                          key={ac.id || idx}
-                          className="bg-slate-50/60 border border-slate-200/50 rounded-xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center text-xs gap-2"
-                        >
-                          <span className="font-semibold text-slate-600 sm:w-28 shrink-0">
-                            {ac.category}
-                          </span>
-                          <span className="text-slate-700 flex-1">
-                            {ac.text}
-                          </span>
-                        </div>
-                      ),
-                    )}
+                    {(selectedReq.conditions || []).map((ac: Condition, idx: number) => (
+                      <div
+                        key={ac.id || idx}
+                        className="bg-slate-50/60 border border-slate-200/50 rounded-xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center text-xs gap-2"
+                      >
+                        <span className="font-semibold text-slate-600 sm:w-28 shrink-0">
+                          {ac.category}
+                        </span>
+                        <span className="text-slate-700 flex-1">{ac.text}</span>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
 
               <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
                 <span className="text-xs font-semibold text-emerald-600">
-                  검토 상태:{" "}
-                  {selectedReq.review_status === "approved"
-                    ? "확정됨"
-                    : "대기 중"}
+                  검토 상태: {selectedReq.review_status === "approved" ? "확정됨" : "대기 중"}
                 </span>
                 <div className="flex items-center space-x-2">
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    size="md"
-                    onClick={handleStartEdit}
-                  >
+                  <Button type="button" variant="secondary" size="md" onClick={handleStartEdit}>
                     요구사항 수정
                   </Button>
                   {selectedReq.review_status !== "approved" && (
-                    <Button
-                      type="button"
-                      variant="primary"
-                      size="md"
-                      onClick={handleApproveRequirement}
-                    >
+                    <Button type="button" variant="primary" size="md" onClick={handleApproveRequirement}>
                       검토 확정
                     </Button>
                   )}

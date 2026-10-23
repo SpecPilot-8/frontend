@@ -3,7 +3,7 @@ import { RequirementPanel } from "./RequirementPanel";
 import { Button } from "../common";
 import { useProject } from "../../contexts/ProjectContext";
 import { BASE_URL } from "../../services/api";
-import type { Requirement } from "../../types/verification";
+import type { Requirement, ConditionVerdictItem } from "../../types/verification";
 import type { StepId } from "../../types";
 
 interface VerificationDetailProps {
@@ -32,6 +32,7 @@ interface CallFlowNode {
 interface VerificationDetailData {
   status: string;
   reason: string;
+  condition_verdicts?: ConditionVerdictItem[];
   call_flow?: {
     nodes?: CallFlowNode[];
   };
@@ -181,16 +182,8 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
     );
   }
 
-  const stats = {
-    input: 3,
-    navigation: 3,
-    businessLogic: 3,
-    data: 3,
-    errorMessage: 2,
-  };
-
   return (
-    <div className="max-w-6xl mx-auto py-2 px-2 md:px-4 space-y-4">
+    <div className="max-w-[1400px] mx-auto py-2 px-2 md:px-4 space-y-4">
       <div className="flex items-center justify-between bg-white px-6 py-4 rounded-xl border border-slate-200/80 shadow-sm mb-4">
         <div className="flex items-center gap-4">
           <button
@@ -225,9 +218,13 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
       </div>
 
       <div className="flex flex-col md:flex-row gap-6 items-start">
-        <RequirementPanel requirement={requirement} stats={stats} />
+        <RequirementPanel
+          projectId={projectId ?? ""}
+          requirement={requirement}
+          conditionVerdicts={verificationData.condition_verdicts ?? []}
+        />
 
-        <div className="flex-1 bg-white rounded-xl border border-slate-200/80 shadow-sm p-6 w-full">
+        <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-6 w-full">
           <div className="flex justify-between items-end mb-6 border-b border-slate-100 pb-4">
             <div>
               <h3 className="text-base font-bold text-slate-900 mb-1.5">

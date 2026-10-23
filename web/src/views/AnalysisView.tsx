@@ -10,6 +10,8 @@ import {
   PageHeader,
 } from "../components/common";
 import { VIEW_HEADER } from "../styles/typography";
+import { CATEGORY_LABEL } from "../constants/verdict";
+import type { ConditionCategory } from "../constants/verdict";
 
 interface AnalysisViewProps {
   onNavigateStep: (step: StepId) => void;
@@ -872,7 +874,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                       조건
                     </span>
                     <span className="text-xs font-semibold text-slate-800 truncate block">
-                      {selectedReq.condition || "첨부파일 ≤ 300MB"}
+                      {selectedReq.condition || "—"}
                     </span>
                   </div>
                   <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-3">
@@ -880,7 +882,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                       동작
                     </span>
                     <span className="text-xs font-semibold text-slate-800 truncate block">
-                      {selectedReq.action || "공지사항 등록"}
+                      {selectedReq.action || "—"}
                     </span>
                   </div>
                   <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-3">
@@ -888,7 +890,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                       기대 결과
                     </span>
                     <span className="text-xs font-semibold text-slate-800 truncate block">
-                      {selectedReq.expected || "목록으로 이동"}
+                      {selectedReq.expected || "—"}
                     </span>
                   </div>
                 </div>
@@ -911,7 +913,7 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
                           className="bg-slate-50/60 border border-slate-200/50 rounded-xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center text-xs gap-2"
                         >
                           <span className="font-semibold text-slate-600 sm:w-28 shrink-0">
-                            {ac.category}
+                            {CATEGORY_LABEL[ac.category as ConditionCategory] ?? ac.category}
                           </span>
                           <span className="text-slate-700 flex-1">
                             {ac.text}

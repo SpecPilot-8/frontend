@@ -9,6 +9,8 @@ import {
   PageHeader,
 } from "../components/common";
 import { VerificationDetail } from "../components/verification/VerificationDetail";
+import { STATUS_LABEL } from "../constants/verdict";
+import type { VerdictStatus } from "../constants/verdict";
 import {
   fetchRequirements,
   fetchProjectSetup,
@@ -32,6 +34,8 @@ export type VerificationStatus =
   | "NEED_CHECK";
 
 export interface TraceabilityRow {
+  requirementId?: string;
+  backendStatus?: string;
   stable_key: string;
   featureName: string;
   status: VerificationStatus;
@@ -128,6 +132,26 @@ const getStatusLabel = (status: string) => {
   }
 };
 
+// 추적표 API 행 → 화면 행. 판정 상태는 status(enum)이고 analysis_state는 분석 진행 상태(completed 등)다.
+const toTraceabilityRow = (item: Record<string, unknown>): TraceabilityRow => {
+  const backendStatus = typeof item.status === "string" ? item.status : "";
+  const mappedStatus = mapBackendStatusToFrontend(backendStatus);
+  const evidenceCount =
+    typeof item.evidence_count === "number" ? item.evidence_count : 0;
+  return {
+    requirementId: String(item.requirement_id || ""),
+    stable_key: String(item.stable_key || item.requirement_id || ""),
+    featureName: String(item.title || "기능명 없음"),
+    status: mappedStatus,
+    // 확인 필요는 무엇을 확인해야 하는지(AI 판단 어려움 / 실행 확인 필요)까지 보여준다
+    statusLabel:
+      STATUS_LABEL[backendStatus as VerdictStatus] ?? getStatusLabel(mappedStatus),
+    backendStatus,
+    linkedCode: evidenceCount > 0 ? `${evidenceCount}개 근거 발견` : "연결 코드 없음",
+    summary: String(item.reason || "요약 정보 없음"),
+  };
+};
+
 export const VerificationView: React.FC<VerificationViewProps> = ({
   onNavigateStep,
   onSelectRequirementForTest,
@@ -177,7 +201,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
           const latestRunId = runs[0].id;
 
           const verifyRes = await fetch(
-            `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/traceability`,
+            `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/traceability?limit=200`,
           )
             .then((res) => {
               if (!res.ok) throw new Error("추적 데이터 로드 실패");
@@ -187,29 +211,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
 
           if (verifyRes && verifyRes.items && verifyRes.items.length > 0) {
             const formattedData = verifyRes.items.map(
-              (item: Record<string, unknown>) => {
-                const statusStr =
-                  typeof item.analysis_state === "string"
-                    ? item.analysis_state
-                    : "";
-                const mappedStatus = mapBackendStatusToFrontend(statusStr);
-                const hasEvidence =
-                  typeof item.evidence_count === "number" &&
-                  item.evidence_count > 0;
-
-                return {
-                  stable_key: String(
-                    item.stable_key || item.requirement_id || "",
-                  ),
-                  featureName: String(item.title || "기능명 없음"),
-                  status: mappedStatus,
-                  statusLabel: getStatusLabel(mappedStatus),
-                  linkedCode: hasEvidence
-                    ? `${item.evidence_count}개 근거 발견`
-                    : "연결 코드 없음",
-                  summary: String(item.reason || "요약 정보 없음"),
-                };
-              },
+              toTraceabilityRow,
             );
             setTableData(formattedData);
             setIsVerified(true);
@@ -321,7 +323,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
         if (runsAfterPoll && runsAfterPoll.length > 0) {
           const latestRunId = runsAfterPoll[0].id;
           const verifyResReload = await fetch(
-            `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/traceability`,
+            `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/traceability?limit=200`,
           )
             .then((res) => res.json())
             .catch(() => ({ items: [] }));
@@ -332,29 +334,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
             verifyResReload.items.length > 0
           ) {
             const formattedData = verifyResReload.items.map(
-              (item: Record<string, unknown>) => {
-                const statusStr =
-                  typeof item.analysis_state === "string"
-                    ? item.analysis_state
-                    : "";
-                const mappedStatus = mapBackendStatusToFrontend(statusStr);
-                const hasEvidence =
-                  typeof item.evidence_count === "number" &&
-                  item.evidence_count > 0;
-
-                return {
-                  stable_key: String(
-                    item.stable_key || item.requirement_id || "",
-                  ),
-                  featureName: String(item.title || "기능명 없음"),
-                  status: mappedStatus,
-                  statusLabel: getStatusLabel(mappedStatus),
-                  linkedCode: hasEvidence
-                    ? `${item.evidence_count}개 근거 발견`
-                    : "연결 코드 없음",
-                  summary: String(item.reason || "요약 정보 없음"),
-                };
-              },
+              toTraceabilityRow,
             );
             setTableData(formattedData);
             setIsVerified(true);
@@ -423,6 +403,10 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
       (r) => r.status === "UNIMPLEMENTED",
     ).length;
     const needCheck = tableData.filter((r) => r.status === "NEED_CHECK").length;
+    const needsReview = tableData.filter((r) => r.backendStatus === "needs_review").length;
+    const notVerifiable = tableData.filter(
+      (r) => r.backendStatus === "not_statically_verifiable",
+    ).length;
     const total = tableData.length;
     const matchPercentage =
       total > 0 ? ((implemented / total) * 100).toFixed(1) : "0.0";
@@ -433,6 +417,8 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
       mismatched,
       unimplemented,
       needCheck,
+      needsReview,
+      notVerifiable,
       total,
       matchPercentage,
     };
@@ -628,7 +614,10 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
           <div className="text-2xl font-bold text-slate-900 mt-1">
             {stats.needCheck}
           </div>
-          <div className="text-[10px] text-slate-400 mt-1">근거 추가 검토</div>
+          <div className="text-[10px] text-slate-500 mt-1 space-y-0.5">
+            <div>AI 판단 어려움 {stats.needsReview}</div>
+            <div>실행 확인 필요 {stats.notVerifiable}</div>
+          </div>
         </div>
       </div>
 
@@ -704,7 +693,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
                   <td className="py-3 px-4 text-right">
                     <button
                       type="button"
-                      onClick={() => setSelectedReqId(row.stable_key)}
+                      onClick={() => setSelectedReqId(row.requirementId || row.stable_key)}
                       className="text-[11px] font-medium text-slate-500 hover:text-blue-600 transition-colors"
                     >
                       상세 보기

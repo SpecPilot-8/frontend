@@ -36,10 +36,31 @@ export interface SourceRef {
   };
 }
 
+export interface RequirementCondition {
+  id: string;
+  stable_key?: string;
+  text: string;
+  category: string;
+  verifiable?: string;
+}
+
 export interface Requirement {
   id?: string;
+  document_id?: string;
   stable_key: string;
   title?: string;
   original_text: string;
   source_refs?: SourceRef[];
+  conditions?: RequirementCondition[];
+}
+
+// GET /verification-runs/{v}/requirements/{r} 의 condition_verdicts
+export interface ConditionVerdictItem {
+  condition_id: string;
+  status: string | null;
+  reason: string;
+  evidence_ids: string[];
+  message_match?: string;
+  server_validation?: string;
+  spec_suspect?: string;
 }

@@ -14,7 +14,6 @@ import {
   fetchProjectSetup,
   pollJobStatus,
   fetchVerificationRuns,
-  isMockMode,
   BASE_URL,
 } from "../services/api";
 
@@ -177,10 +176,6 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
 
   const handleStartVerification = async () => {
     if (!projectId) return;
-    if (isMockMode) {
-      alert("현재 목업 모드입니다. 실제 검증을 위해 목업 모드를 해제해 주세요.");
-      return;
-    }
     
     setIsLoading(true);
 
@@ -366,7 +361,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
     );
   }
 
-  if (!isVerified && !isMockMode) {
+  if (!isVerified) {
     return (
       <div className="max-w-6xl mx-auto py-2 px-2 md:px-4 space-y-4">
         <PageHeader

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { RequirementPanel } from "./RequirementPanel";
 import { Button } from "../common";
 import { useProject } from "../../contexts/ProjectContext";
-import { isMockMode, BASE_URL } from "../../services/api";
+import { BASE_URL } from "../../services/api";
 import type { Requirement } from "../../types/verification";
 import type { StepId } from "../../types";
 
@@ -64,7 +64,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
   );
 
   useEffect(() => {
-    if (!projectId || isMockMode) return;
+    if (!projectId) return;
 
     const fetchData = async () => {
       setIsLoading(true);
@@ -111,7 +111,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
     setOpenEvidenceIds(newSet);
   };
 
-  if (isLoading && !isMockMode) {
+  if (isLoading) {
     return (
       <div className="p-8 text-center text-slate-500">
         서버에서 상세 데이터를 불러오는 중입니다...

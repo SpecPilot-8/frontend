@@ -9,8 +9,8 @@ import {
   saveProjectCredentials,
   updateProjectLLMConfig,
   verifyLLMConnection,
-  isMockMode,
   BASE_URL,
+  api, fetchAll,
 } from "../services/api";
 import { useProject } from "../contexts/ProjectContext";
 import { useFileUpload } from "../hooks";
@@ -22,10 +22,6 @@ interface SetupViewProps {
   onProjectUpdated?: (projectName: string) => void;
   initialData?: ProjectSetupData;
 }
-
-const generateSnapshotId = () => {
-  return "UPLOAD-" + new Date().getTime().toString().slice(-4);
-};
 
 export const SetupView: React.FC<SetupViewProps> = ({
   onNavigateStep,
@@ -129,7 +125,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
         type: "ZIP",
         sourceName: selectedFile.name,
         fileCount: 0,
-        snapshotId: generateSnapshotId(),
+        snapshotId: undefined,
       });
     },
   });
@@ -139,9 +135,9 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
     Promise.all([
       fetchProjectSetup(projectId),
-      fetch(`${BASE_URL}/projects/${projectId}/documents`).then((res) => res.json()).catch(() => ({ items: [] })),
-      fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`).then((res) => res.json()).catch(() => ({ items: [] })),
-      fetch(`${BASE_URL}/projects/${projectId}/llm`).then((res) => res.json()).catch(() => ({ config_version: 0 })),
+      fetchAll<{ id: string; filename?: string; revision?: number; file_count?: number }>(`/projects/${projectId}/documents`).then(items => ({ items: items.reverse() })),
+      fetchAll<{ id: string; filename?: string; revision?: number; file_count?: number }>(`/projects/${projectId}/code/snapshots`).then(items => ({ items: items.reverse() })),
+      api<{ profile_id: string; config_version: number; connection_status: string }>(`/projects/${projectId}/llm`),
     ])
       .then(([setup, docsData, codeData, llmData]) => {
         if (!initialData) {
@@ -181,6 +177,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           }
 
           setSetupData(updatedSetup);
+          onProjectUpdated?.(updatedSetup.projectName);
         }
       })
       .catch((err) => {
@@ -189,7 +186,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       .finally(() => {
         setIsLoading(false);
       });
-  }, [initialData, projectId]);
+  }, [initialData, projectId, onProjectUpdated]);
 
   const currentModel =
     aiModels.find((m) => m.id === setupData?.aiConfig.modelId) || aiModels[0];
@@ -211,13 +208,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
     value: string | boolean | number,
   ) => {
     if (!setupData) return;
-    setSetupData({
-      ...setupData,
-      aiConfig: {
-        ...setupData.aiConfig,
-        [key]: value,
-      },
-    });
+    setSetupData(prev => prev ? ({ ...prev, aiConfig: { ...prev.aiConfig, [key]: value,
+      ...((key === "modelId" || key === "apiKey") ? { isConnected: false } : {}) } }) : prev);
     if (key === "modelId" || key === "apiKey") {
       setConnectionStatus("IDLE");
       setConnectionErrorMsg("");
@@ -239,11 +231,14 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
       if (response.success && response.projectId) {
         const newProjectId = response.projectId;
-        handleUpdateField("version", baseVersion + 1);
+        const saved = response.data as { version: number };
+        setSetupData(prev => prev ? { ...prev, version: saved.version } : prev);
+        setProjectId(newProjectId);
 
         if (specFile) {
           setSavingMessage("명세 문서를 서버에 업로드하는 중...");
           await uploadDocument(newProjectId, specFile);
+          setSpecFile(null);
         }
 
         if (codeSourceTab === "ZIP" && codeFile) {
@@ -295,7 +290,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           }
         }
 
-        setProjectId(newProjectId);
+        setCodeFile(null);
         setIsUploaded(true);
         alert("프로젝트 저장 및 파일 업로드가 완료되었습니다. 이제 AI API 연결을 확인해주세요.");
       } else {
@@ -311,17 +306,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
     }
   };
 
-  const handleVerifyApiKeyMock = () => {
-    if (!projectId) {
-      alert("먼저 프로젝트를 저장하고 파일을 업로드해주세요.");
-      return;
-    }
-    setConnectionStatus("SUCCESS");
-    setConnectionErrorMsg("");
-    handleUpdateAiConfig("isConnected", true);
-    alert("[개발 모드] AI API 연결이 임시로 강제 통과되었습니다.");
-  };
-
   const handleVerifyApiKey = async () => {
     if (!projectId) {
       alert("먼저 프로젝트를 저장하고 파일을 업로드해주세요.");
@@ -332,11 +316,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
     setConnectionErrorMsg("");
 
     try {
-      if (isMockMode) {
-        handleVerifyApiKeyMock();
-        return;
-      }
-
       const selectedProfile = modelProfiles.find((p) => p.id === setupData?.aiConfig.modelId);
       let currentConfigVersion = setupData?.aiConfig.configVersion || 0;
       let credentialRef: string | undefined;
@@ -750,20 +729,10 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 <div className="flex items-center space-x-1.5">
                   <Button
                     type="button"
-                    variant="ghost"
-                    size="md"
-                    onClick={handleVerifyApiKeyMock}
-                    disabled={!isUploaded}
-                    className="text-amber-600 bg-amber-50 hover:bg-amber-100"
-                  >
-                    임시 강제 통과
-                  </Button>
-                  <Button
-                    type="button"
                     variant="secondary"
                     size="md"
                     onClick={handleVerifyApiKey}
-                    disabled={connectionStatus === "CHECKING" || !isUploaded}
+                    disabled={connectionStatus === "CHECKING" || !isUploaded || !modelProfiles.some(p => p.id === setupData.aiConfig.modelId && p.enabled)}
                   >
                     {connectionStatus === "CHECKING"
                       ? "확인 중..."

@@ -2,12 +2,15 @@ import React, { useState, useEffect } from "react";
 import { RequirementPanel } from "./RequirementPanel";
 import { Button } from "../common";
 import { useProject } from "../../contexts/ProjectContext";
-import { BASE_URL } from "../../services/api";
+import { api, errorMessage } from "../../services/api";
 import type { Requirement } from "../../types/verification";
 import type { StepId } from "../../types";
 
 interface VerificationDetailProps {
   requirementId: string;
+  requirementRevision: number;
+  runId: string;
+  onSelectForTest?: () => void;
   onBack: () => void;
   onNavigateStep: (step: StepId) => void;
 }
@@ -50,10 +53,12 @@ interface VerificationDetailData {
 
 export const VerificationDetail: React.FC<VerificationDetailProps> = ({
   requirementId,
+  requirementRevision, runId, onSelectForTest,
   onBack,
   onNavigateStep,
 }) => {
   const { projectId } = useProject();
+  const [error,setError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
   const [requirement, setRequirement] = useState<Requirement | null>(null);
@@ -69,40 +74,21 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        const reqRes = await fetch(
-          `${BASE_URL}/projects/${projectId}/requirements/${requirementId}`,
-        );
-        if (reqRes.ok) {
-          setRequirement(await reqRes.json());
-        }
-
-        const runsRes = await fetch(
-          `${BASE_URL}/projects/${projectId}/verification-runs`,
-        );
-        if (runsRes.ok) {
-          const runsData = await runsRes.json();
-          if (runsData.items?.length > 0) {
-            const latestRunId = runsData.items[0].id;
-            const detailRes = await fetch(
-              `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/requirements/${requirementId}`,
-            );
-            if (detailRes.ok) {
-              const detailData: VerificationDetailData = await detailRes.json();
-              setVerificationData(detailData);
-              if (detailData.evidence && detailData.evidence.length > 0) {
-                setOpenEvidenceIds(new Set([detailData.evidence[0].id]));
-              }
-            }
-          }
-        }
+        const [req, detailData] = await Promise.all([
+          api<Requirement>(`/projects/${projectId}/requirements/${requirementId}?revision=${requirementRevision}`),
+          api<VerificationDetailData>(`/projects/${projectId}/verification-runs/${runId}/requirements/${requirementId}`),
+        ]);
+        setRequirement(req); setVerificationData(detailData);
+        const first = detailData.evidence?.find(e => e.role === 'problem') || detailData.evidence?.[0];
+        setOpenEvidenceIds(new Set(first ? [first.id] : []));
       } catch (error) {
-        console.error("상세 데이터 호출 실패:", error);
+        setError(errorMessage(error));
       } finally {
         setIsLoading(false);
       }
     };
     fetchData();
-  }, [projectId, requirementId]);
+  }, [projectId, requirementId, requirementRevision, runId]);
 
   const toggleEvidence = (id: string) => {
     const newSet = new Set(openEvidenceIds);
@@ -122,7 +108,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
   if (!requirement || !verificationData) {
     return (
       <div className="p-8 text-center text-slate-500">
-        데이터를 찾을 수 없거나 분석 모델이 아직 연결되지 않았습니다.
+        {error || "데이터를 불러올 수 없습니다."}
         <div className="mt-4">
           <Button onClick={onBack} variant="outline" className="mr-2">
             목록으로 돌아가기
@@ -151,7 +137,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
           <Button
             variant="primary"
             size="md"
-            onClick={() => onNavigateStep("TEST_SPEC")}
+            onClick={() => onSelectForTest ? onSelectForTest() : onNavigateStep("TEST_SPEC")}
             className="bg-blue-600 text-white"
           >
             이 요구사항의 테스트
@@ -160,7 +146,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
       </div>
 
       <div className="flex flex-col md:flex-row gap-6 items-start">
-        <RequirementPanel requirement={requirement} verificationData={verificationData} />
+        <RequirementPanel requirement={requirement} verificationData={verificationData} onReview={() => onNavigateStep("ANALYSIS")} />
 
         <div className="flex-1 bg-white rounded-xl border border-slate-200/80 shadow-sm p-6 w-full">
           <div className="flex justify-between items-end mb-6 border-b border-slate-100 pb-4">
@@ -186,7 +172,8 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                     const nodesList = verificationData.call_flow?.nodes ?? [];
                     return (
                       <React.Fragment key={node.id}>
-                        <span
+                        <button
+                          onClick={() => { setOpenEvidenceIds(new Set(node.evidence_ids || [])); setTimeout(() => document.getElementById(`evidence-${node.evidence_ids?.[0]}`)?.scrollIntoView({block:"nearest"}), 0); }}
                           className={
                             node.evidence_ids && node.evidence_ids.length > 0
                               ? "font-bold text-red-500"
@@ -194,7 +181,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                           }
                         >
                           {node.label}
-                        </span>
+                        </button>
                         {idx < nodesList.length - 1 && (
                           <span className="text-slate-300">→</span>
                         )}
@@ -208,7 +195,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
           {(!verificationData.evidence ||
             verificationData.evidence.length === 0) && (
             <div className="p-8 text-center bg-slate-50 rounded-lg border border-slate-200 text-slate-500 text-sm">
-              분석 범위 내에서 관련된 코드 근거를 찾지 못했습니다.
+              {verificationData.reason || "코드 근거가 없습니다."}
             </div>
           )}
 
@@ -220,6 +207,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
               return (
                 <div
                   key={ev.id}
+                  id={`evidence-${ev.id}`}
                   className={`border rounded-lg overflow-hidden transition-colors ${isOpen ? (isProblem ? "border-red-200" : "border-blue-200") : "border-slate-200"}`}
                 >
                   <button

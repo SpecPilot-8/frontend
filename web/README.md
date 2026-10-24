@@ -1,3 +1,25 @@
+# SpecPilot 웹앱
+
+VS Code 스타일의 독립 웹앱입니다. 브라우저에서 사용하며 확장 설치는 필요하지 않습니다.
+
+```bash
+cd web
+npm ci
+npm run dev -- --host 127.0.0.1
+```
+
+기본 API 주소는 `http://127.0.0.1:8000/api/v2`입니다. 변경하려면 `web/.env.local`의
+`VITE_API_URL`을 설정하고 개발 서버를 재시작하세요. 서버 CORS에도 웹앱 주소를 허용해야 합니다.
+
+```bash
+npm run build
+npm run lint
+```
+
+LLM 미연결 상태에서는 자동 분석이 차단됩니다. 수동 요구사항 검토와 시험 작성·수행 결과 저장·Excel 출력은 별도로 사용할 수 있습니다.
+
+---
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

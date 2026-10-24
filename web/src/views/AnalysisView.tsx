@@ -53,7 +53,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     }).catch(e => active && setMessage(errorMessage(e)));
     return () => { active = false; };
   }, [projectId]);
-  useEffect(() => { void load().catch(e => setMessage(errorMessage(e))); }, [load]);
+  useEffect(() => { void Promise.resolve().then(load).catch(e => setMessage(errorMessage(e))); }, [load]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (editing) event.preventDefault(); };
     window.addEventListener('beforeunload', warn);

@@ -160,9 +160,13 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
       </div>
 
       <div className="flex flex-col md:flex-row gap-6 items-start">
-        <RequirementPanel requirement={requirement} verificationData={verificationData} />
+        <RequirementPanel
+          projectId={projectId ?? ""}
+          requirement={requirement}
+          verificationData={verificationData}
+        />
 
-        <div className="flex-1 bg-white rounded-xl border border-slate-200/80 shadow-sm p-6 w-full">
+        <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-6 w-full">
           <div className="flex justify-between items-end mb-6 border-b border-slate-100 pb-4">
             <div>
               <h3 className="text-base font-bold text-slate-900 mb-1.5">

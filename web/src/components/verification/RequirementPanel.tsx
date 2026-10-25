@@ -1,5 +1,7 @@
 import React from 'react';
 import { Card, Button } from '../common';
+import { SpecPageViewer } from './SpecPageViewer';
+import { BASE_URL } from '../../services/api';
 import type { Requirement, SourceRef } from '../../types/verification';
 
 interface ConditionVerdict {
@@ -19,14 +21,18 @@ interface VerificationData {
 }
 
 interface RequirementPanelProps {
+  projectId: string;
   requirement: Requirement;
   verificationData?: VerificationData;
 }
 
-export const RequirementPanel: React.FC<RequirementPanelProps> = ({ requirement, verificationData }) => {
+export const RequirementPanel: React.FC<RequirementPanelProps> = ({ projectId, requirement, verificationData }) => {
   const primaryRef: SourceRef | undefined = requirement.source_refs?.[0];
   const pageIndex = primaryRef?.location?.index || 0;
   const bbox = primaryRef?.location?.bbox;
+  const fileUrl = requirement.document_id
+    ? `${BASE_URL}/projects/${projectId}/documents/${requirement.document_id}/file`
+    : null;
 
   const categories = [
     { key: 'display', label: '화면 표시' },
@@ -53,7 +59,7 @@ export const RequirementPanel: React.FC<RequirementPanelProps> = ({ requirement,
   }).filter(Boolean) as { key: string; label: string; total: number; implemented: number }[];
 
   return (
-    <div className="w-[320px] shrink-0 space-y-6">
+    <div className="w-full md:w-[44%] shrink-0 space-y-6">
       <Card className="p-6 flex flex-col gap-6">
         <div>
           <h3 className="text-lg font-bold text-slate-900 mb-1">요구사항</h3>
@@ -65,32 +71,13 @@ export const RequirementPanel: React.FC<RequirementPanelProps> = ({ requirement,
           </p>
         </div>
 
-        {primaryRef && (
+        {fileUrl && pageIndex > 0 && (
           <div className="border-t border-slate-100 pt-6">
-            <h4 className="text-sm font-bold text-slate-900 mb-3">
-              기획서 원문 발췌 (PDF {pageIndex}페이지)
+            <h4 className="text-sm font-bold text-slate-900 mb-1">
+              기획서 원본 (PDF {pageIndex}페이지)
             </h4>
-            
-            <div className="bg-white border border-slate-200 rounded-md p-4 mb-2 shadow-sm relative overflow-hidden">
-              <div className="flex items-center gap-2 mb-2">
-                <span className="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded font-bold">화면 ID</span>
-                <span className="text-xs text-slate-800 font-mono">
-                  {requirement.stable_key.split('-').slice(0, 2).join('-')}
-                </span>
-              </div>
-              <div className="text-xs text-slate-500 mb-1 font-medium">Description</div>
-              
-              <p className="text-sm text-slate-900 leading-relaxed mt-2">
-                <span className="bg-yellow-200/80 px-1 py-0.5 rounded text-[13px] leading-relaxed box-decoration-clone">
-                  {primaryRef.quote}
-                </span>
-              </p>
-            </div>
-            
-            <p className="text-xs text-slate-500">
-              위치: {pageIndex}페이지 · Description 
-              {bbox && ` (좌표: x:${Math.round(bbox[0])}, y:${Math.round(bbox[1])})`}
-            </p>
+            <p className="text-xs text-slate-500 mb-3">노란 박스가 이 요구사항이 적힌 위치입니다.</p>
+            <SpecPageViewer fileUrl={fileUrl} page={pageIndex} bbox={bbox} />
           </div>
         )}
 

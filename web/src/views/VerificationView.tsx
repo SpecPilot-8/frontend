@@ -128,7 +128,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
           const latestRunId = runs[0].id;
 
           const verifyRes = await fetch(
-            `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/traceability`,
+            `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/traceability?limit=200`,
           )
             .then((res) => {
               if (!res.ok) throw new Error("추적 데이터 로드 실패");
@@ -266,7 +266,7 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
         if (runsAfterPoll && runsAfterPoll.length > 0) {
           const latestRunId = runsAfterPoll[0].id;
           const verifyResReload = await fetch(
-            `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/traceability`,
+            `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/traceability?limit=200`,
           )
             .then((res) => res.json())
             .catch(() => ({ items: [] }));

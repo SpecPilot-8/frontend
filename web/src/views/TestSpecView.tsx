@@ -19,6 +19,16 @@ import {
   BASE_URL,
 } from "../services/api";
 
+// 백엔드 enum 코드를 화면 라벨로 바꾼다 (docs/schemas/test-generation.schema.json)
+const TYPE_LABEL: Record<string, string> = { positive: "정상", negative: "오류", boundary: "경계값" };
+const PREDICTION_LABEL: Record<string, string> = {
+  normal_expected: "정상 예상",
+  failure_expected: "실패 예상",
+  needs_review: "확인 필요",
+  unknown: "예상 없음",
+};
+const STEP_STATUS_LABEL: Record<string, string> = { not_run: "미실행", passed: "통과", failed: "실패", on_hold: "보류" };
+
 interface TestSpecViewProps {
   onNavigateStep: (step: StepId) => void;
   selectedRequirementId?: string;
@@ -72,7 +82,11 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
         setTestCases(cases);
         
         if (cases.length > 0) {
-          setActiveCaseId(prev => prev || cases[0].id);
+          // 검증 상세의 '이 요구사항의 테스트'로 오면 그 요구사항에 연결된 첫 시험을 연다
+          const linked = cases.find((c: TestCase) =>
+            c.requirement_links.some((l) => l.requirement_id === selectedRequirementId),
+          );
+          setActiveCaseId(prev => prev || (linked ?? cases[0]).id);
         }
       }
     } catch (error) {
@@ -80,7 +94,7 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [projectId]);
+  }, [projectId, selectedRequirementId]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -283,7 +297,7 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
       <div className="max-w-6xl mx-auto py-2 px-2 md:px-4 space-y-4">
         <PageHeader
           stepTag="04 / TEST SPECIFICATION"
-          title={`QA 테스트 사양서 명세 ${selectedRequirementId ? `[${selectedRequirementId}]` : ''}`}
+          title="QA 테스트 사양서 명세"
           description="검증된 요구사항을 바탕으로 자동 구성된 테스트 케이스와 검증 절차를 검토합니다."
           action={
             <div className="flex items-center space-x-2 flex-wrap">
@@ -317,7 +331,7 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
                         <span className="font-bold font-mono text-blue-600">{item.test_no}</span>
                       </div>
                       <div className="font-semibold truncate">{item.title}</div>
-                      <div className="text-[10px] text-slate-400">유형: {item.type}</div>
+                      <div className="text-[10px] text-slate-400">유형: {TYPE_LABEL[item.type] ?? item.type}</div>
                     </button>
                   );
                 })}
@@ -354,7 +368,7 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
 
                   {activeCase.prediction && (
                     <div className="p-3 bg-blue-50/50 rounded-lg border border-blue-100 text-blue-900/90">
-                      <span className="font-bold block mb-1">AI 코드 예측 ({activeCase.prediction.status})</span>
+                      <span className="font-bold block mb-1">AI 코드 예측 ({PREDICTION_LABEL[activeCase.prediction.status] ?? activeCase.prediction.status})</span>
                       {activeCase.prediction.reason}
                     </div>
                   )}
@@ -372,7 +386,7 @@ export const TestSpecView: React.FC<TestSpecViewProps> = ({
                         <div key={step.step_key} className="p-3 border border-slate-200 rounded-lg bg-white space-y-2 shadow-sm">
                           <div className="flex justify-between items-start">
                             <span className="font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded">Step {step.order}</span>
-                            {!isEditing && <StatusBadge status={status} />}
+                            {!isEditing && <StatusBadge status={STEP_STATUS_LABEL[status] ?? status} />}
                           </div>
                           
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-2">

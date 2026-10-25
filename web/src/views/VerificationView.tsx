@@ -1,644 +1,77 @@
-import React, { useState, useEffect, useMemo } from "react";
-import type { StepId, RequirementItem, ProjectSetupData } from "../types";
-import { useProject } from "../contexts/ProjectContext";
-import {
-  Button,
-  Card,
-  Input,
-  StatusBadge,
-  PageHeader,
-} from "../components/common";
-import { VerificationDetail } from "../components/verification/VerificationDetail";
-import {
-  fetchRequirements,
-  fetchProjectSetup,
-  pollJobStatus,
-  fetchVerificationRuns,
-  BASE_URL,
-} from "../services/api";
+import React, { useCallback, useEffect, useState } from 'react';
+import type { StepId, RequirementItem } from '../types';
+import { useProject } from '../contexts/ProjectContext';
+import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } from '../services/api';
+import { Button, Card, PageHeader } from '../components/common';
+import { VerificationDetail } from '../components/verification/VerificationDetail';
 
-interface VerificationViewProps {
-  onNavigateStep: (step: StepId) => void;
-  onSelectRequirementForTest?: (reqId: string) => void;
-  requirementsData?: RequirementItem[];
-  setupData?: ProjectSetupData;
-}
-
-export type VerificationStatus =
-  | "IMPLEMENTED"
-  | "PARTIAL"
-  | "MISMATCHED"
-  | "UNIMPLEMENTED"
-  | "NEED_CHECK";
-
-export interface TraceabilityRow {
-  requirement_id: string;
-  stable_key: string;
-  featureName: string;
-  status: VerificationStatus;
-  statusLabel: string;
-  linkedCode: string;
-  summary: string;
-}
-
-const mapBackendStatusToFrontend = (
-  backendStatus: string,
-): VerificationStatus => {
-  switch (backendStatus) {
-    case "implemented":
-      return "IMPLEMENTED";
-    case "partial":
-      return "PARTIAL";
-    case "mismatch":
-      return "MISMATCHED";
-    case "not_found":
-      return "UNIMPLEMENTED";
-    case "needs_review":
-    case "not_statically_verifiable":
-      return "NEED_CHECK";
-    default:
-      return "NEED_CHECK";
-  }
-};
-
-const getStatusLabel = (status: string) => {
-  switch (status) {
-    case "IMPLEMENTED":
-      return "구현";
-    case "PARTIAL":
-      return "부분구현";
-    case "MISMATCHED":
-      return "불일치";
-    case "UNIMPLEMENTED":
-      return "미구현 후보";
-    case "NEED_CHECK":
-      return "확인 필요";
-    default:
-      return "상태 불명";
-  }
-};
-
-export const VerificationView: React.FC<VerificationViewProps> = ({
-  onNavigateStep,
-  onSelectRequirementForTest,
-  requirementsData,
-  setupData,
-}) => {
+interface Run { id: string; created_at: string; snapshot_id: string; status: string }
+interface Row { requirement_id: string; requirement_revision: number; stable_key: string; title: string; topic_title: string; subtopic_title: string; analysis_state: string; status: string | null; reason: string; evidence_count: number }
+const labels: Record<string,string> = { implemented:'구현됨', partial:'부분 구현', mismatch:'불일치', not_found:'미구현 후보', needs_review:'확인 필요', not_statically_verifiable:'정적 검증 불가', not_run:'미분석' };
+export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void; onSelectRequirementForTest?: (id: string) => void }> = ({ onNavigateStep, onSelectRequirementForTest }) => {
   const { projectId } = useProject();
-  const [selectedReqId, setSelectedReqId] = useState<string | null>(null);
-  const [projectSetup, setProjectSetup] = useState<ProjectSetupData | null>(
-    setupData || null,
-  );
-  const [requirementsList, setRequirementsList] = useState<RequirementItem[]>(
-    requirementsData || [],
-  );
-  const [isVerified, setIsVerified] = useState<boolean>(false);
-  const [tableData, setTableData] = useState<TraceabilityRow[]>([]);
-  const [searchQuery, setSearchQuery] = useState<string>("");
-  const [selectedStatusFilter, setSelectedStatusFilter] =
-    useState<string>("ALL");
-  const [isLoading, setIsLoading] = useState<boolean>(false);
-  const [sourceData, setSourceData] = useState<{ id?: string } | null>(null);
-
+  const [runs,setRuns] = useState<Run[]>([]);
+  const [runId,setRunId] = useState('');
+  const [rows,setRows] = useState<Row[]>([]);
+  const [summary,setSummary] = useState<Record<string,number>>({});
+  const [selected,setSelected] = useState<Row | null>(null);
+  const [search,setSearch] = useState('');
+  const [filter,setFilter] = useState('');
+  const [message,setMessage] = useState('');
+  const [busy,setBusy] = useState(false);
+  const base = `/projects/${projectId}`;
+  const load = useCallback(async () => {
+    if (!projectId) return;
+    const items = await fetchAll<Run>(`/projects/${projectId}/verification-runs`);
+    items.reverse(); setRuns(items); setRunId(prev => prev || items[0]?.id || '');
+  },[projectId]);
+  useEffect(() => { void Promise.resolve().then(load).catch(e => setMessage(errorMessage(e))); },[load]);
   useEffect(() => {
-    if (!projectId) return;
-
-    const forceLoadData = async () => {
-      try {
-        const [setupRes, reqRes, srcRes] = await Promise.all([
-          fetchProjectSetup(projectId),
-          fetchRequirements(projectId),
-          fetch(`${BASE_URL}/projects/${projectId}/code/snapshots`)
-            .then((res) => res.json())
-            .catch(() => ({ items: [] })),
-        ]);
-
-        if (setupRes) setProjectSetup(setupRes);
-        if (reqRes) setRequirementsList(reqRes);
-
-        if (srcRes && srcRes.items && srcRes.items.length > 0) {
-          setSourceData(srcRes.items[0]);
-        } else {
-          setSourceData(null);
-        }
-
-        const runs = await fetchVerificationRuns(projectId);
-        if (runs && runs.length > 0) {
-          const latestRunId = runs[0].id;
-
-          const verifyRes = await fetch(
-            `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/traceability`,
-          )
-            .then((res) => {
-              if (!res.ok) throw new Error("추적 데이터 로드 실패");
-              return res.json();
-            })
-            .catch(() => ({ items: [] }));
-
-          if (verifyRes && verifyRes.items && verifyRes.items.length > 0) {
-            const formattedData = verifyRes.items.map(
-              (item: Record<string, unknown>) => {
-                // [status가 없을 경우 null 처리 방어 및 정확한 매핑 적용
-                const backendStatus = String(item.status || "");
-                const mappedStatus = mapBackendStatusToFrontend(backendStatus);
-                const hasEvidence =
-                  typeof item.evidence_count === "number" &&
-                  item.evidence_count > 0;
-
-                return {
-                  requirement_id: String(item.requirement_id || ""),
-                  stable_key: String(item.stable_key || ""),
-                  featureName: String(item.title || "기능명 없음"),
-                  status: mappedStatus,
-                  statusLabel: getStatusLabel(mappedStatus),
-                  linkedCode: hasEvidence
-                    ? `${item.evidence_count}개 근거 발견`
-                    : "연결 코드 없음",
-                  summary: String(item.reason || "요약 정보 없음"),
-                };
-              },
-            );
-            setTableData(formattedData);
-            setIsVerified(true);
-          } else {
-            setIsVerified(false);
-          }
-        } else {
-          setIsVerified(false);
-        }
-      } catch (error) {
-        console.error("검증 초기 데이터 로딩 에러:", error);
-      }
-    };
-
-    forceLoadData();
-  }, [projectId]);
-
-  const handleStartVerification = async () => {
-    if (!projectId) return;
-    
-    setIsLoading(true);
-
-    try {
-      const directCodeRes = await fetch(
-        `${BASE_URL}/projects/${projectId}/code/snapshots`,
-      );
-      if (!directCodeRes.ok) throw new Error("스냅샷 목록 조회 실패");
-      const directCodeData = await directCodeRes.json();
-
-      if (!directCodeData.items || directCodeData.items.length === 0) {
-        alert(
-          "백엔드에 등록된 소스코드 스냅샷이 없습니다.\n좌측 메뉴 [01 프로젝트 설정]으로 이동\n2. ZIP 파일 선택\n3. 화면 맨 아래 [명세 분석 시작]을 눌러 스냅샷을 생성해 주세요.",
-        );
-        setIsLoading(false);
-        return;
-      }
-
-      const snapshotId = directCodeData.items[0].id;
-      setSourceData(directCodeData.items[0]);
-
-      const reqsToVerify = requirementsList.filter(
-        (r) => r.review_status === "approved",
-      );
-
-      if (reqsToVerify.length === 0) {
-        alert("검토 확정(approved)된 요구사항이 한 건도 없습니다. 이전 화면에서 요구사항을 먼저 확정해 주세요.");
-        setIsLoading(false);
-        return;
-      }
-
-      const verifyRes = await fetch(
-        `${BASE_URL}/projects/${projectId}/verification-runs`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            snapshot_id: snapshotId,
-            requirement_versions: reqsToVerify.map((r) => {
-              const req = r as RequirementItem & { revision?: number };
-              return {
-                requirement_id: req.id,
-                revision: typeof req.revision === "number" ? req.revision : 1,
-              };
-            }),
-            model_config_version: 0,
-          }),
-        },
-      );
-
-      if (!verifyRes.ok) {
-        throw new Error("검증 런 생성 요청이 거부되었습니다.");
-      }
-
-      const verifyJob = await verifyRes.json();
-
-      if (verifyJob.status === "blocked" || verifyJob.status === "failed") {
-        alert(`[백엔드 검증 차단됨]\n사유: ${verifyJob.missing_features?.[0]?.message || "AI 모델 어댑터 미연결"}\n\n코드 검증은 AI 모델이 필수적이므로 더 이상 진행할 수 없습니다.`);
-        setIsLoading(false);
-        return;
-      }
-
-      if (verifyJob.id) {
-        const finalJob = (await pollJobStatus(
-          projectId,
-          verifyJob.id,
-          (jobInfo: { progress?: { stage: string } }) => {
-            if (jobInfo.progress) {
-              console.log(`검증 진행 중... 단계: ${jobInfo.progress.stage}`);
-            }
-          },
-        )) as { status: string; error?: { message: string } };
-
-        if (["failed", "blocked", "cancelled"].includes(finalJob.status)) {
-          alert(`[검증 실패]\n상태: ${finalJob.status}\n서버에서 코드 검증을 완료하지 못했습니다.`);
-          setIsLoading(false);
-          return;
-        }
-
-        alert("AI 코드 검증이 성공적으로 완료되었습니다.");
-
-        const runsAfterPoll = await fetchVerificationRuns(projectId);
-        if (runsAfterPoll && runsAfterPoll.length > 0) {
-          const latestRunId = runsAfterPoll[0].id;
-          const verifyResReload = await fetch(
-            `${BASE_URL}/projects/${projectId}/verification-runs/${latestRunId}/traceability`,
-          )
-            .then((res) => res.json())
-            .catch(() => ({ items: [] }));
-
-          if (
-            verifyResReload &&
-            verifyResReload.items &&
-            verifyResReload.items.length > 0
-          ) {
-            const formattedData = verifyResReload.items.map(
-              (item: Record<string, unknown>) => {
-                const backendStatus = String(item.status || "");
-                const mappedStatus = mapBackendStatusToFrontend(backendStatus);
-                const hasEvidence =
-                  typeof item.evidence_count === "number" &&
-                  item.evidence_count > 0;
-
-                return {
-                  requirement_id: String(item.requirement_id || ""),
-                  stable_key: String(item.stable_key || ""),
-                  featureName: String(item.title || "기능명 없음"),
-                  status: mappedStatus,
-                  statusLabel: getStatusLabel(mappedStatus),
-                  linkedCode: hasEvidence
-                    ? `${item.evidence_count}개 근거 발견`
-                    : "연결 코드 없음",
-                  summary: String(item.reason || "요약 정보 없음"),
-                };
-              },
-            );
-            setTableData(formattedData);
-            setIsVerified(true);
-          }
-        }
-      }
-    } catch (error) {
-      console.error(error);
-      alert("검증 요청 중 통신 오류가 발생했습니다.");
-    } finally {
-      setIsLoading(false);
+    let active=true;
+    if (runId) {
+      const query=`?q=${encodeURIComponent(search)}${filter ? `&status=${filter}`:''}`;
+      Promise.all([fetchAll<Row>(`${base}/verification-runs/${runId}/traceability${query}`), api<Record<string,number>>(`${base}/verification-runs/${runId}/summary${query}`)])
+        .then(([items,stats]) => { if(active){setRows(items);setSummary(stats);} }).catch(e => active && setMessage(errorMessage(e)));
     }
+    return () => {active=false;};
+  },[runId,base,filter,search]);
+  const verify = async () => {
+    setBusy(true);setMessage('');
+    try {
+      const [snapshots,requirements,config] = await Promise.all([
+        fetchAll<{id:string}>(`${base}/code/snapshots`),fetchAll<RequirementItem & {revision:number}>(`${base}/requirements`),api<{config_version:number}>(`${base}/llm`),
+      ]);
+      if (!snapshots.length) throw new Error('코드를 먼저 등록·인덱싱하세요.');
+      const approved=requirements.filter(r => r.review_status==='approved');
+      if (!approved.length) throw new Error('요구사항을 먼저 검토 확정하세요.');
+      const job=await api<{id:string}>(`${base}/verification-runs`,jsonRequest('POST',{snapshot_id:snapshots.at(-1)!.id,requirement_versions:approved.map(r=>({requirement_id:r.id,revision:r.revision})),model_config_version:config.config_version}));
+      const done=await pollJobStatus(projectId!,job.id) as {status:string;missing_features:{message:string}[]};
+      const items=(await fetchAll<Run>(`${base}/verification-runs`)).reverse();setRuns(items);setRunId(items[0]?.id || '');
+      setMessage(done.status==='blocked' ? `분석 차단: ${done.missing_features.map(f=>f.message).join(' / ')}. 판정은 미분석으로 남깁니다.` : `검증 상태: ${done.status}`);
+    } catch(e){setMessage(errorMessage(e));} finally{setBusy(false);}
   };
-
-  const confirmedRequirementsCount = useMemo(() => {
-    return requirementsList.filter((r) => r.review_status === "approved").length;
-  }, [requirementsList]);
-
-  const requirementStatusText = confirmedRequirementsCount > 0 ? "검토 완료" : "검토 필요";
-  const requirementCountText = `확정 ${confirmedRequirementsCount || requirementsList.length}개`;
-
-  const isSourceConnected = !!sourceData?.id;
-  const sourceSnapshotId = sourceData?.id || "스냅샷 미지정";
-  const sourceStatusText = isSourceConnected ? "연결됨" : "보류";
-
-  const verificationRunStatus = isVerified ? "실행 완료" : "미실행";
-  const verificationAnalysisStatus = isVerified ? "분석 완료" : "미분석";
-
-  const specVersionLabel = projectSetup?.specFile?.version || "v0.2";
-  const snapshotLabel = sourceData?.id || "S-014";
-
-  const filteredData = useMemo(() => {
-    return tableData.filter((row) => {
-      const matchSearch =
-        row.stable_key.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        row.featureName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        row.linkedCode.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchStatus =
-        selectedStatusFilter === "ALL" || row.status === selectedStatusFilter;
-      return matchSearch && matchStatus;
-    });
-  }, [tableData, searchQuery, selectedStatusFilter]);
-
-  const stats = useMemo(() => {
-    const implemented = tableData.filter((r) => r.status === "IMPLEMENTED").length;
-    const partial = tableData.filter((r) => r.status === "PARTIAL").length;
-    const mismatched = tableData.filter((r) => r.status === "MISMATCHED").length;
-    const unimplemented = tableData.filter((r) => r.status === "UNIMPLEMENTED").length;
-    const needCheck = tableData.filter((r) => r.status === "NEED_CHECK").length;
-    const total = tableData.length;
-    const matchPercentage = total > 0 ? ((implemented / total) * 100).toFixed(1) : "0.0";
-
-    return { implemented, partial, mismatched, unimplemented, needCheck, total, matchPercentage };
-  }, [tableData]);
-
-  if (selectedReqId) {
-    return (
-      <VerificationDetail
-        requirementId={selectedReqId}
-        onBack={() => setSelectedReqId(null)}
-        onNavigateStep={(step) => {
-          if (onSelectRequirementForTest) {
-            onSelectRequirementForTest(selectedReqId);
-          }
-          onNavigateStep(step);
-        }}
-      />
-    );
-  }
-
-  if (!isVerified) {
-    return (
-      <div className="max-w-6xl mx-auto py-2 px-2 md:px-4 space-y-4">
-        <PageHeader
-          stepTag="03 / VERIFICATION RESULTS"
-          title="검증 결과를 아직 만들지 못했습니다."
-          description="검증이 완료되면 요구사항별 구현 상태와 코드 근거가 여기에 표시됩니다."
-        />
-
-        <div className="bg-amber-50 border border-amber-200/80 rounded-xl p-4 text-xs">
-          <div className="font-semibold text-amber-800">
-            코드 검증 서비스를 사용할 수 없습니다.
-          </div>
-          <div className="text-amber-700/90 text-[11px] mt-0.5">
-            프로젝트의 코드와 모델 연결을 확인한 뒤 다시 시도해 주세요.
-          </div>
-        </div>
-
-        <Card
-          title="분석할 자료는 준비되어 있습니다."
-          description="현재는 구현 여부를 판단할 수 없는 상태입니다."
-          className="space-y-5"
-        >
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-4 space-y-1.5">
-              <span className="text-xs font-bold text-slate-800">요구사항</span>
-              <div className="text-xs text-slate-600">
-                {requirementCountText}
-              </div>
-              <div className="pt-1">
-                <StatusBadge status={requirementStatusText} />
-              </div>
-            </div>
-
-            <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-4 space-y-1.5">
-              <span className="text-xs font-bold text-slate-800">소스코드</span>
-              <div className="text-xs text-slate-600 truncate">
-                {sourceSnapshotId}
-              </div>
-              <div className="pt-1">
-                <StatusBadge
-                  status={sourceStatusText === "연결됨" ? "완료" : "보류"}
-                />
-              </div>
-            </div>
-
-            <div className="bg-slate-50/70 border border-slate-200/60 rounded-xl p-4 space-y-1.5">
-              <span className="text-xs font-bold text-slate-800">
-                검증 결과
-              </span>
-              <div className="text-xs text-slate-600">
-                {verificationRunStatus}
-              </div>
-              <div className="pt-1">
-                <span className="text-[10px] text-slate-400">
-                  {verificationAnalysisStatus}
-                </span>
-              </div>
-            </div>
-          </div>
-
-          <div className="text-[11px] text-slate-400">
-            검증 전에는 정합률이나 미구현 수를 계산하지 않습니다.
-          </div>
-
-          <div className="pt-2 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100">
-            <div className="flex items-center space-x-2">
-              <Button
-                type="button"
-                variant="secondary"
-                size="md"
-                onClick={() => onNavigateStep("SETUP")}
-              >
-                연결 설정 확인
-              </Button>
-              <Button
-                type="button"
-                variant="secondary"
-                size="md"
-                onClick={() => onNavigateStep("ANALYSIS")}
-              >
-                요구사항 확인
-              </Button>
-              <Button
-                type="button"
-                variant="primary"
-                size="md"
-                className="bg-blue-600 text-white"
-                onClick={handleStartVerification}
-              >
-                {isLoading ? "검증 분석 중..." : "다시 검증 (AI 요청)"}
-              </Button>
-            </div>
-          </div>
-        </Card>
-      </div>
-    );
-  }
-
-  return (
-    <div className="max-w-6xl mx-auto py-2 px-2 md:px-4 space-y-4">
-      <PageHeader
-        stepTag="03 / VERIFICATION RESULTS"
-        title="검증 결과"
-        description={`확정한 요구사항 ${stats.total}개를 코드 ${snapshotLabel}와 비교했습니다.`}
-        action={
-          <Button
-            type="button"
-            variant="primary"
-            size="lg"
-            onClick={() => {
-              if (onSelectRequirementForTest && tableData.length > 0) {
-                onSelectRequirementForTest(tableData[0].stable_key);
-              }
-              onNavigateStep("TEST_SPEC");
-            }}
-            className="whitespace-nowrap"
-          >
-            테스트 사양서
-          </Button>
-        }
-      />
-
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-          <div className="text-[11px] text-slate-500">구현</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">
-            {stats.implemented}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-1">명세와 일치</div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-          <div className="text-[11px] text-slate-500">부분구현</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">
-            {stats.partial}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-1">일부 조건 누락</div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-          <div className="text-[11px] text-slate-500">불일치</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">
-            {stats.mismatched}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-1">명세와 코드 상충</div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm">
-          <div className="text-[11px] text-slate-500">미구현 후보</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">
-            {stats.unimplemented}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-1">연결 코드 미발견</div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm col-span-2 sm:col-span-1">
-          <div className="text-[11px] text-slate-500">확인 필요</div>
-          <div className="text-2xl font-bold text-slate-900 mt-1">
-            {stats.needCheck}
-          </div>
-          <div className="text-[10px] text-slate-400 mt-1">근거 추가 검토</div>
-        </div>
-      </div>
-
-      <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm overflow-hidden">
-        <div className="p-5 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-bold text-slate-900">요구사항 추적표</h2>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-2.5">
-            <Input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="요구사항 ID · 기능 · 파일 검색"
-              className="w-52"
-            />
-
-            <select
-              value={selectedStatusFilter}
-              onChange={(e) => setSelectedStatusFilter(e.target.value)}
-              className="px-2.5 py-2 text-xs border border-slate-200 rounded-lg text-slate-700 focus:outline-none focus:border-blue-500 bg-white"
-            >
-              <option value="ALL">상태: 전체</option>
-              <option value="IMPLEMENTED">구현</option>
-              <option value="PARTIAL">부분구현</option>
-              <option value="MISMATCHED">불일치</option>
-              <option value="UNIMPLEMENTED">미구현 후보</option>
-              <option value="NEED_CHECK">확인 필요</option>
-            </select>
-
-            <Button type="button" variant="secondary" size="md">
-              추적표 내보내기
-            </Button>
-          </div>
-        </div>
-
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50/70 border-b border-slate-100 text-[11px] font-semibold text-slate-500">
-                <th className="py-2.5 px-4 w-28">요구사항</th>
-                <th className="py-2.5 px-4 w-40">기능</th>
-                <th className="py-2.5 px-4 w-24">상태</th>
-                <th className="py-2.5 px-4 w-52">연결된 코드</th>
-                <th className="py-2.5 px-4">진단 요약</th>
-                <th className="py-2.5 px-4 w-20 text-right">작업</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-xs">
-              {filteredData.map((row) => (
-                <tr
-                  key={row.stable_key}
-                  className="hover:bg-slate-50/60 transition-colors"
-                >
-                  <td className="py-3 px-4 font-mono font-bold text-blue-600">
-                    {row.stable_key}
-                  </td>
-                  <td className="py-3 px-4 font-medium text-slate-800">
-                    {row.featureName}
-                  </td>
-                  <td className="py-3 px-4">
-                    <StatusBadge status={row.statusLabel} />
-                  </td>
-                  <td className="py-3 px-4 font-mono text-[11px] text-slate-600 truncate max-w-xs">
-                    {row.linkedCode}
-                  </td>
-                  <td className="py-3 px-4 text-slate-600 truncate max-w-sm">
-                    {row.summary}
-                  </td>
-                  <td className="py-3 px-4 text-right">
-                    <button
-                      type="button"
-                      onClick={() => setSelectedReqId(row.requirement_id)}
-                      className="text-[11px] font-medium text-slate-500 hover:text-blue-600 transition-colors"
-                    >
-                      상세 보기
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="p-4 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400">
-          <div>
-            분석 기준: 명세 {specVersionLabel} · 코드 {snapshotLabel} | 명세나 코드가 바뀌면 다시 검증하세요.
-          </div>
-          <div>
-            전체 {stats.total}개 · 명세 완전 일치 {stats.implemented}/{stats.total} ({stats.matchPercentage}%)
-          </div>
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between pt-1">
-        <Button
-          type="button"
-          variant="secondary"
-          size="md"
-          onClick={() => onNavigateStep("ANALYSIS")}
-        >
-          명세 다시 검토
-        </Button>
-
-        <div className="flex items-center space-x-2">
-          <Button
-            type="button"
-            variant="secondary"
-            size="md"
-            onClick={handleStartVerification}
-          >
-            다시 검증 (AI 요청)
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
+  const exportTrace = async () => {
+    setBusy(true);
+    try {
+      const job=await api<{id:string}>(`${base}/exports/traceability`,jsonRequest('POST',{verification_run_id:runId,format:'xlsx'}));
+      const done=await pollJobStatus(projectId!,job.id) as {status:string;result_ref?:{id:string}};
+      if(done.status!=='completed'||!done.result_ref) throw new Error(`내보내기 상태: ${done.status}`);
+      const response=await fetch(`${BASE_URL}${base}/artifacts/${done.result_ref.id}/download`);
+      if(!response.ok) throw new Error('다운로드에 실패했습니다.');
+      const url=URL.createObjectURL(await response.blob());const link=document.createElement('a');link.href=url;link.download='요구사항-추적표.xlsx';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    }catch(e){setMessage(errorMessage(e));}finally{setBusy(false);}
+  };
+  if(!projectId)return <Button onClick={()=>onNavigateStep('SETUP')}>프로젝트를 선택하세요</Button>;
+  if(selected)return <VerificationDetail requirementId={selected.requirement_id} requirementRevision={selected.requirement_revision} runId={runId} onBack={()=>setSelected(null)} onNavigateStep={onNavigateStep} onSelectForTest={()=>onSelectRequirementForTest?.(selected.requirement_id)} />;
+  const run=runs.find(r=>r.id===runId);
+  return <div className="max-w-7xl mx-auto space-y-5">
+    <PageHeader stepTag="03 / VERIFICATION" title="검증 결과" description="선택한 실행의 요구사항 개정·코드 스냅샷을 기준으로 판정과 근거를 확인합니다." />
+    {message&&<p role="status" className="p-3 bg-blue-50 rounded text-sm">{message}</p>}
+    <div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={verify}>코드 검증 시작</Button><Button variant="secondary" onClick={()=>onNavigateStep('ANALYSIS')}>명세 검토로 이동</Button><Button variant="secondary" onClick={()=>onNavigateStep('TEST_SPEC')}>테스트 사양서로 이동</Button></div>
+    <Card title="요구사항 추적표" description={run ? `실행 상태: ${run.status} · 스냅샷 ${run.snapshot_id}`:'아직 검증 실행이 없습니다'}>
+      <div className="flex flex-wrap gap-3 mb-4"><select aria-label="검증 실행 선택" value={runId} onChange={e=>setRunId(e.target.value)} className="border rounded p-2 max-w-sm">{runs.map(r=><option key={r.id} value={r.id}>{r.created_at} · {r.status}</option>)}</select><input aria-label="추적표 검색" placeholder="기능·주제 검색" value={search} onChange={e=>setSearch(e.target.value)} className="border rounded p-2"/><select aria-label="판정 필터" value={filter} onChange={e=>setFilter(e.target.value)} className="border rounded p-2"><option value="">전체</option>{Object.entries(labels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select><Button disabled={!runId||busy} onClick={exportTrace}>추적표 Excel 출력</Button></div>
+      <p className="text-sm mb-4">선택 범위 {summary.total||0}건 · 구현됨 {summary.implemented||0}건 · 구현율 {(summary.implementation_rate||0).toFixed(1)}% · 미분석 {summary.not_run||0}건</p>
+      <div className="overflow-auto"><table className="w-full text-sm text-left"><thead><tr>{['주제 / 소주제','기능명','판정','근거','사유','상세'].map(v=><th className="p-3 border-b" key={v}>{v}</th>)}</tr></thead><tbody>{rows.map(r=><tr key={r.requirement_id}><td className="p-3 border-b">{r.topic_title} / {r.subtopic_title}</td><td className="p-3 border-b">{r.title}<small className="block">개정 {r.requirement_revision}</small></td><td className="p-3 border-b">{labels[r.status||'not_run']}<small className="block">{r.analysis_state}</small></td><td className="p-3 border-b">{r.evidence_count}곳</td><td className="p-3 border-b">{r.reason}</td><td className="p-3 border-b"><Button onClick={()=>setSelected(r)}>상세 보기</Button></td></tr>)}</tbody></table></div>
+    </Card>
+  </div>;
 };

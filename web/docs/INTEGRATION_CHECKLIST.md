@@ -30,4 +30,6 @@ VITE_API_URL(기본 http://127.0.0.1:8000/api/v2)과 백엔드 CORS를 맞춘다
 
 남은 범위: 실제 모델 연결 및 자동 API 작업 실행, 장시간 Job 진행/새로고침 복원, 운영 인증. PDF 뷰어 번들 크기 경고는 후속 성능 개선 대상이다. 기존 모델 결과의 전체 재생은 파이프라인 DB/스냅샷 인계 후 검증한다.
 
-검토: frontend #10~#19 및 backend #62~#68은 기능별 PR로 올려두었다. main 병합은 구체적 승인 대기이며, 기존 #9 PDF 뷰어는 #18에 보존했다. 전체 현황은 backend #47을 따른다.
+반영: 2026-10-25 사용자 승인 후 frontend #10~#19 및 backend #62~#68을 main에 병합했다. 기존 #9 PDF 뷰어도 #18을 통해 원래 커밋을 보존해 병합됐다. 병합된 main에서 프런트 build/lint와 백엔드 테스트 66개·Ruff를 다시 통과했다. frontend #1/#3/#4, backend #56~#59는 종료했고 일부만 구현된 이슈는 유지한다.
+
+남은 작업의 담당·순서·완료 기준은 [MVP 완성 계획](https://github.com/SpecPilot-8/backend/blob/main/docs/MVP_COMPLETION_PLAN.md), 전체 현황은 [통합 #47](https://github.com/SpecPilot-8/backend/issues/47)을 따른다.

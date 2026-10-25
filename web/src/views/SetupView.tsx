@@ -436,7 +436,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
                         {setupData.specFile?.fileName}
                       </div>
                       <div className="text-[11px] text-slate-400 mt-0.5">
-                        PDF · {setupData.specFile?.pageCount ?? 1}페이지 ·{" "}
+                        PDF · {setupData.specFile?.pageCount ? `${setupData.specFile.pageCount}페이지` : "페이지 수 확인 전"} ·{" "}
                         {setupData.specFile?.version ?? "v1.0"}
                       </div>
                     </div>

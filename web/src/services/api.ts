@@ -1,3 +1,4 @@
+import type { TestSpecification } from "../types/test";
 import type {
   AIModelOption,
   RecentProject,
@@ -8,11 +9,6 @@ import type {
 
 export const BASE_URL =
   import.meta.env.VITE_API_URL || "http://127.0.0.1:8000/api/v2";
-
-export let isMockMode = false;
-export const setMockMode = (mode: boolean) => {
-  isMockMode = mode;
-};
 
 export class APIError extends Error {
   code?: string;
@@ -28,7 +24,7 @@ export class APIError extends Error {
   }
 }
 
-const handleResponse = async (res: Response) => {
+export const handleResponse = async (res: Response) => {
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
     throw new APIError(
@@ -40,10 +36,8 @@ const handleResponse = async (res: Response) => {
 };
 
 export const fetchRecentProjects = async (): Promise<RecentProject[]> => {
-  if (isMockMode) return [];
   try {
-    const res = await fetch(`${BASE_URL}/projects`);
-    const data = await handleResponse(res);
+    const data = { items: await fetchAll<{ id: string; name: string; created_at: string }>("/projects") };
     return data.items.map(
       (p: { id: string; name: string; created_at: string }) => ({
         id: p.id,
@@ -55,7 +49,7 @@ export const fetchRecentProjects = async (): Promise<RecentProject[]> => {
     );
   } catch (error) {
     console.error("프로젝트 목록 조회 실패:", error);
-    return [];
+    throw error;
   }
 };
 
@@ -160,11 +154,7 @@ export const uploadSourceCode = async (projectId: string, file: File) => {
 export const fetchRequirements = async (
   projectId: string,
 ): Promise<RequirementItem[]> => {
-  const res = await fetch(
-    `${BASE_URL}/projects/${projectId}/requirements?limit=200`,
-  );
-  const data = await handleResponse(res);
-  return data.items || [];
+  return fetchAll<RequirementItem>(`/projects/${projectId}/requirements`);
 };
 
 export const fetchDocumentOutline = async (): Promise<
@@ -174,19 +164,11 @@ export const fetchDocumentOutline = async (): Promise<
 };
 
 export const fetchVerificationRuns = async (projectId: string) => {
-  const res = await fetch(
-    `${BASE_URL}/projects/${projectId}/verification-runs`,
-  );
-  const data = await handleResponse(res);
-  return data.items || [];
+  return (await fetchAll<{ id: string; created_at: string }>(`/projects/${projectId}/verification-runs`)).reverse();
 };
 
 export const fetchTestSpecifications = async (projectId: string) => {
-  const res = await fetch(
-    `${BASE_URL}/projects/${projectId}/test-specifications`,
-  );
-  const data = await handleResponse(res);
-  return data.items || [];
+  return (await fetchAll<TestSpecification>(`/projects/${projectId}/test-specifications`)).reverse();
 };
 
 export async function pollJobStatus(
@@ -196,7 +178,7 @@ export async function pollJobStatus(
     progress?: { stage: string; completed: number; total: number };
   }) => void,
 ): Promise<unknown> {
-  const maxAttempts = 300; 
+  const maxAttempts = 900; 
   let attempts = 0;
   let delay = 1000;
 
@@ -220,6 +202,7 @@ export async function pollJobStatus(
         return job;
       }
     } catch (error) {
+      if (error instanceof APIError && error.code !== "POLLING_TIMEOUT") throw error;
       console.error("Job 폴링 중 네트워크 에러 (재시도 중):", error);
       delay = Math.min(delay * 1.5, 5000);
     }
@@ -282,3 +265,26 @@ export const saveTestBatch = async (projectId: string, specId: string, payload: 
   });
   return await handleResponse(res);
 };
+
+export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  return handleResponse(await fetch(`${BASE_URL}${path}`, init));
+}
+export const jsonRequest = (method: string, body: unknown): RequestInit => ({
+  method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+});
+export async function fetchAll<T>(path: string): Promise<T[]> {
+  const items: T[] = [];
+  let total = Infinity;
+  while (items.length < total) {
+    const query = path.includes("?") ? "&" : "?";
+    const page = await api<{ items: T[]; total: number }>(`${path}${query}limit=200&offset=${items.length}`);
+    items.push(...page.items);
+    total = page.total;
+    if (!page.items.length) break;
+  }
+  return items;
+}
+export function errorMessage(error: unknown): string {
+  if (error instanceof APIError) return `${error.message}${error.code ? ` (${error.code})` : ""}`;
+  return error instanceof Error ? error.message : "요청을 처리할 수 없습니다";
+}

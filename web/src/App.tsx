@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import type { StepId } from './types';
 import { Header, Sidebar, StatusBar } from './components/layout';
 import {
@@ -12,19 +12,19 @@ import { ProjectProvider } from './contexts/ProjectContext';
 
 export const App: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<StepId>('HOME');
-  const [projectName, setProjectName] = useState<string>('ThinkTree Notice Platform');
-  const [techStack, setTechStack] = useState<string>('Java · Spring Boot');
-  const [selectedRequirementId, setSelectedRequirementId] = useState<string>('NOTICE-001');
+  const [projectName, setProjectName] = useState<string>('프로젝트 선택');
+  const [techStack, setTechStack] = useState<string>('');
+  const [selectedRequirementId, setSelectedRequirementId] = useState<string>('');
 
   const handleSelectProject = (projectId: string) => {
     setProjectName(`Project-${projectId}`);
-    setTechStack('Java · Spring Boot');
+    setTechStack('');
     setCurrentStep('SETUP');
   };
 
-  const handleProjectUpdated = (newProjectName: string) => {
+  const handleProjectUpdated = useCallback((newProjectName: string) => {
     setProjectName(newProjectName);
-  };
+  }, []);
 
   const handleSelectRequirementForTest = (reqId: string) => {
     setSelectedRequirementId(reqId);
@@ -98,8 +98,8 @@ export const App: React.FC = () => {
 
         {/* 하단 상태 바 */}
         <StatusBar
-          specVersion={currentStep !== 'HOME' ? 'v0.2' : undefined}
-          codeSnapshot={currentStep !== 'HOME' ? 'S-014' : undefined}
+          specVersion={undefined}
+          codeSnapshot={undefined}
           language="한국어"
         />
       </div>

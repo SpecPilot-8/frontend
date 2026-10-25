@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from "react";
 import type { StepId, RequirementItem, Condition } from "../types";
-import { fetchRequirements, pollJobStatus, isMockMode, BASE_URL } from "../services/api";
+import { fetchRequirements, pollJobStatus, BASE_URL } from "../services/api";
 import { useProject } from "../contexts/ProjectContext";
 import {
   Button,
@@ -104,10 +104,6 @@ export const AnalysisView: React.FC<AnalysisViewProps> = ({
 
   const handleStartAIAnalysis = async () => {
     if (!projectId) return;
-    if (isMockMode) {
-      alert("현재 목업 모드입니다. 실제 AI 분석을 위해 목업 모드를 해제해 주세요.");
-      return;
-    }
 
     setIsLoading(true);
     setPollingMessage("백엔드에 분석을 요청하는 중입니다...");

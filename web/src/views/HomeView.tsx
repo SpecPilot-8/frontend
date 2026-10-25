@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import type { RecentProject, StepId } from '../types';
-import { fetchRecentProjects, BASE_URL } from '../services/api';
+import { fetchRecentProjects } from '../services/api';
 import { useProject } from '../contexts/ProjectContext';
 import { Button, Card, StatusBadge, EmptyState } from '../components/common';
 
@@ -16,6 +16,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const { setProjectId } = useProject();
 
   const [projects, setProjects] = useState<RecentProject[]>([]);
+  const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const loadProjects = () => {
@@ -23,7 +24,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
       .then((data) => {
         setProjects([...data].reverse());
       })
-      .catch((error) => console.error('Failed to load recent projects:', error))
+      .catch((error: Error) => setError(error.message))
       .finally(() => setIsLoading(false));
   };
 
@@ -39,27 +40,6 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const handleOpenProject = (id: string) => {
     setProjectId(id);
     onSelectProject(id);
-  };
-
-  // 서버에 실제 삭제(DELETE) 요청 보내기
-  const handleDeleteProject = async (id: string) => {
-    if (window.confirm("이 프로젝트를 완전히 삭제하시겠습니까?")) {
-      setProjects((prev) => prev.filter((p) => String(p.id) !== id));
-
-      try {
-        const res = await fetch(`${BASE_URL}/projects/${id}`, {
-          method: 'DELETE',
-        });
-
-        if (!res.ok) {
-          throw new Error('서버 삭제 실패');
-        }
-      } catch (error) {
-        console.error('프로젝트 삭제 오류:', error);
-        alert('삭제에 실패했습니다. 서버 연결 상태를 확인해주세요.');
-        loadProjects();
-      }
-    }
   };
 
   return (
@@ -85,6 +65,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </Button>
       </div>
 
+      {error && <p role="alert" className="text-red-600">{error}</p>}
       <Card
         title="최근 프로젝트"
         description="이전에 분석 및 검증을 진행했던 프로젝트 목록입니다."
@@ -148,12 +129,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   >
                     열기
                   </Button>
-                  <button
-                    onClick={() => handleDeleteProject(String(project.id))}
-                    className="px-3 py-1.5 text-xs font-medium text-red-500 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors border border-transparent hover:border-red-100"
-                  >
-                    삭제
-                  </button>
+
                 </div>
               </div>
             ))}

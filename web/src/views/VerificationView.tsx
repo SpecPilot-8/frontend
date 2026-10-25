@@ -560,8 +560,9 @@ export const VerificationView: React.FC<VerificationViewProps> = ({
             variant="primary"
             size="lg"
             onClick={() => {
-              if (onSelectRequirementForTest && tableData.length > 0) {
-                onSelectRequirementForTest(tableData[0].stable_key);
+              // 헤더 버튼은 특정 요구사항이 아니라 사양서 전체를 연다
+              if (onSelectRequirementForTest) {
+                onSelectRequirementForTest("");
               }
               onNavigateStep("TEST_SPEC");
             }}

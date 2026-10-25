@@ -14,7 +14,7 @@ export const App: React.FC = () => {
   const [currentStep, setCurrentStep] = useState<StepId>('HOME');
   const [projectName, setProjectName] = useState<string>('ThinkTree Notice Platform');
   const [techStack, setTechStack] = useState<string>('Java · Spring Boot');
-  const [selectedRequirementId, setSelectedRequirementId] = useState<string>('NOTICE-001');
+  const [selectedRequirementId, setSelectedRequirementId] = useState<string>('');
 
   const handleSelectProject = (projectId: string) => {
     setProjectName(`Project-${projectId}`);

@@ -72,3 +72,29 @@ export const REASON_KIND_LABEL: Record<string, string> = {
   rule_no_evidence: '이 화면 근거 없음',
   rule_other_screen_only: '다른 화면 코드만 있음',
 };
+
+// 시험 사양서 (api/v2/testing.py EXPORT_SECTIONS, docs/schemas/test-generation.schema.json)
+export const TEST_SECTION_LABEL: Record<string, string> = {
+  login: '로그인',
+  signup: '회원가입',
+  password_find: '비밀번호찾기',
+  notice: '공지사항',
+  mypage: '마이페이지',
+  authorization: '권한',
+  general: '기타 기능',
+};
+export const TEST_SECTION_ORDER = Object.keys(TEST_SECTION_LABEL);
+
+export const TEST_TYPE_LABEL: Record<string, string> = {
+  positive: '정상',
+  negative: '오류',
+  boundary: '경계값',
+};
+
+// 코드 판정으로 붙인 예상. 실제 수행 결과가 아니다.
+export const PREDICTION_LABEL: Record<string, string> = {
+  normal_expected: '정상 예상',
+  failure_expected: '실패 예상',
+  needs_review: '확인 필요',
+  unknown: '예상 없음',
+};

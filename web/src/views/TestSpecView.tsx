@@ -74,7 +74,7 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
   };
   const changeResult=(id:string,key:string,field:keyof StepResult,value:string)=>{
     const old=draftFor(cases.find(c=>c.id===id)!);
-    setDrafts(prev=>({...prev,[id]:{...old,executionChanged:true,results:old.results.map(r=>r.step_key===key?{...r,[field]:value,performed_at:null}:r)}}));
+    setDrafts(prev=>({...prev,[id]:{...old,executionChanged:true,results:old.results.map(r=>{if(r.step_key!==key)return r;const changed={...r,[field]:value};return {...changed,performed_at:(changed.status==='passed'||changed.status==='failed')?new Date().toISOString():null};})}}));
   };
   const save=useCallback(async()=>{
     if(!spec)return false;setBusy(true);setNavigationLocked(true);setMessage('');

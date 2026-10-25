@@ -27,6 +27,7 @@ export interface Condition {
   source_refs?: SourceReference[];
   ambiguity?: string[];
   related_condition_ids?: string[];
+  constraint?: { field: string; operator: string; value: number; unit: string; unit_definition?: string | null } | null;
 }
 
 // RequirementItem

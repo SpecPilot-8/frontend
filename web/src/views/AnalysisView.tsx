@@ -13,7 +13,7 @@ const field = 'w-full border border-slate-200 rounded-lg p-2 text-sm bg-white';
 const blankCondition = (): Condition => ({ stable_key: crypto.randomUUID(), text: '', category: 'business_logic', target: 'unknown', verifiable: 'code', source_refs: [] });
 
 export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> = ({ onNavigateStep }) => {
-  const { projectId } = useProject();
+  const { projectId, setUnsavedChanges } = useProject();
   const [docs, setDocs] = useState<Doc[]>([]);
   const [docId, setDocId] = useState('');
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -70,7 +70,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     setTopic(fresh ? '' : g?.title || '');
     setSubtopic(fresh ? '' : g?.subtopics.find(s => s.id === selected?.subtopic_id)?.title || '');
     setConditions(fresh ? [blankCondition()] : structuredClone(selected?.conditions || []));
-    setEditing(true); setMessage('');
+    setEditing(true); setUnsavedChanges(true); setMessage('');
   };
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -88,7 +88,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
         conditions: clean.map(c => ({ ...c, source_refs: source ? [{ block_id: source.id, quote: source.text }] : [] })),
       } : { base_revision: selected?.revision, subtopic_id: group.subtopic_id, title: title.trim(), conditions: clean };
       const saved = await api<Req>(`${base}/requirements${isNew ? '' : `/${selectedId}`}`, jsonRequest(isNew ? 'POST' : 'PATCH', data));
-      await load(); setSelectedId(saved.id); setEditing(false); setMessage('저장했습니다. 변경된 조건을 확인한 뒤 검토를 확정하세요.');
+      await load(); setSelectedId(saved.id); setEditing(false); setUnsavedChanges(false); setMessage('저장했습니다. 변경된 조건을 확인한 뒤 검토를 확정하세요.');
     } catch (e) { setMessage(errorMessage(e)); } finally { setBusy(false); }
   };
   const parse = async () => {
@@ -151,7 +151,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
             <select aria-label={`조건 ${i+1} 검증 가능 여부`} className={field} value={c.verifiable} onChange={e => setConditions(prev => prev.map((x,n) => n===i ? {...x,verifiable:e.target.value as Condition['verifiable']}:x))}><option value="code">코드로 검증</option><option value="not_statically_verifiable">실행 확인 필요</option></select>
             <Button type="button" variant="ghost" disabled={conditions.length===1} onClick={() => setConditions(prev => prev.filter((_,n) => n!==i))}>삭제</Button></div>
           </fieldset>)}
-          <div className="flex gap-2"><Button type="button" variant="secondary" disabled={busy} onClick={() => setConditions(prev => [...prev,blankCondition()])}>조건 추가</Button><Button type="submit" disabled={busy}>저장</Button><Button type="button" variant="secondary" disabled={busy} onClick={() => setEditing(false)}>취소</Button></div>
+          <div className="flex gap-2"><Button type="button" variant="secondary" disabled={busy} onClick={() => setConditions(prev => [...prev,blankCondition()])}>조건 추가</Button><Button type="submit" disabled={busy}>저장</Button><Button type="button" variant="secondary" disabled={busy} onClick={() => {setEditing(false);setUnsavedChanges(false);}}>취소</Button></div>
         </form> : selected ? <div className="space-y-4">
           <p>{groupName(selected)} · 개정 {selected.revision}</p><p className="whitespace-pre-wrap select-text text-sm">{selected.original_text || '원문 출처 없음: 사용자가 수동 작성한 항목입니다.'}</p>
           {selected.conditions.map(c => <div key={c.id || c.stable_key} className="border rounded p-3 text-sm"><small>{categoryLabels[c.category]} · {c.target} · {c.verifiable}</small><p>{c.text}</p></div>)}

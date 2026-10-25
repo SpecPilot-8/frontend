@@ -175,7 +175,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                         <button
                           onClick={() => { setOpenEvidenceIds(new Set(node.evidence_ids || [])); setTimeout(() => document.getElementById(`evidence-${node.evidence_ids?.[0]}`)?.scrollIntoView({block:"nearest"}), 0); }}
                           className={
-                            node.evidence_ids && node.evidence_ids.length > 0
+                            node.evidence_ids?.some(id => verificationData.evidence?.some(ev => ev.id === id && ev.role === 'problem'))
                               ? "font-bold text-red-500"
                               : ""
                           }

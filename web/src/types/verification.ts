@@ -42,4 +42,6 @@ export interface Requirement {
   title?: string;
   original_text: string;
   source_refs?: SourceRef[];
+  // 원본 PDF 조회용 (GET /documents/{document_id}/file)
+  document_id?: string;
 }

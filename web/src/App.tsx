@@ -11,16 +11,19 @@ import {
 import { ProjectProvider, useProject } from './contexts/ProjectContext';
 
 const Workspace: React.FC = () => {
-  const {unsavedChanges,setUnsavedChanges,navigationLocked}=useProject();
+  const {unsavedChanges,setUnsavedChanges,navigationLocked,saveBeforeLeaveRef}=useProject();
+  const [pendingStep,setPendingStep] = useState<StepId | null>(null);
+  const [leaving,setLeaving] = useState(false);
   const [currentStep, setCurrentStep] = useState<StepId>('HOME');
   const [projectName, setProjectName] = useState<string>('프로젝트 선택');
   const [techStack, setTechStack] = useState<string>('');
   const [selectedRequirementId, setSelectedRequirementId] = useState<string>('');
 
+  const finishNavigation = (step: StepId) => { setUnsavedChanges(false); setPendingStep(null); setCurrentStep(step); };
   const navigate = (step: StepId) => {
     if(navigationLocked) return;
-    if(unsavedChanges && !window.confirm('저장하지 않은 변경을 폐기하고 이동할까요? 취소하면 편집을 계속합니다.')) return;
-    setUnsavedChanges(false); setCurrentStep(step);
+    if(unsavedChanges) {setPendingStep(step); return;}
+    finishNavigation(step);
   };
   const handleSelectProject = (projectId: string) => {
     setProjectName(`Project-${projectId}`);
@@ -44,6 +47,7 @@ const Workspace: React.FC = () => {
 
   return (
     <>
+      {pendingStep && <div role="dialog" aria-modal="true" aria-label="미저장 변경 확인" className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center"><div className="bg-white rounded-xl p-6 space-y-4 max-w-lg"><h2 className="font-bold">저장하지 않은 변경이 있습니다</h2><p>저장 후 이동하거나, 변경을 폐기하거나, 편집을 계속할 수 있습니다.</p><div className="flex gap-2"><button disabled={leaving} className="border rounded p-2" onClick={async()=>{setLeaving(true);try{if(await saveBeforeLeaveRef.current?.())finishNavigation(pendingStep);else setPendingStep(null);}finally{setLeaving(false);}}}>저장 후 이동</button><button disabled={leaving} className="border rounded p-2" onClick={()=>finishNavigation(pendingStep)}>변경 폐기 후 이동</button><button disabled={leaving} className="border rounded p-2" onClick={()=>setPendingStep(null)}>편집 계속</button></div></div></div>}
       <div className="flex flex-col h-screen w-screen bg-slate-50 text-slate-800 antialiased overflow-hidden select-none font-sans">
         {/* 상단 글로벌 헤더 */}
         <Header

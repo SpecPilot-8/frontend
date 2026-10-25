@@ -15,7 +15,7 @@ const resultFor=(step_key:string):StepResult=>({step_key,status:'not_run',actual
 const sectionLabels={login:'로그인',signup:'회원가입',password_find:'비밀번호찾기',notice:'공지사항',mypage:'마이페이지',authorization:'권한',general:'기타 기능'};
 
 export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedRequirementId?:string}>=({onNavigateStep,selectedRequirementId})=>{
-  const {projectId,setUnsavedChanges,setNavigationLocked}=useProject();
+  const {projectId,setUnsavedChanges,setNavigationLocked,saveBeforeLeaveRef}=useProject();
   const base=`/projects/${projectId}`;
   const [specs,setSpecs]=useState<Spec[]>([]);
   const [specId,setSpecId]=useState('');
@@ -75,8 +75,8 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
     const old=draftFor(cases.find(c=>c.id===id)!);
     setDrafts(prev=>({...prev,[id]:{...old,executionChanged:true,results:old.results.map(r=>{if(r.step_key!==key)return r;const changed={...r,[field]:value};return {...changed,performed_at:(changed.status==='passed'||changed.status==='failed')?new Date().toISOString():null};})}}));
   };
-  const save=async()=>{
-    if(!spec)return;setBusy(true);setNavigationLocked(true);setMessage('');
+  const save=useCallback(async()=>{
+    if(!spec)return false;setBusy(true);setNavigationLocked(true);setMessage('');
     try{
       const changes=Object.entries(drafts).filter(([,d])=>d.procedureChanged||d.executionChanged).map(([id,d])=>{
         const c=cases.find(c=>c.id===id)!;const ex=executions[id];
@@ -87,9 +87,10 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
       const body={base_specification_revision:spec.revision,changes};const fingerprint=JSON.stringify(body);
       if(pending.current?.fingerprint!==fingerprint)pending.current={fingerprint,payload:{...body,client_save_id:crypto.randomUUID()}};
       await api(`${base}/test-specifications/${spec.id}/edit-batches`,jsonRequest('POST',pending.current.payload));
-      pending.current=null;setDrafts({});setEditing(false);setUnsavedChanges(false);await loadSpec();setMessage('저장했습니다. 서버의 절차·수행 결과·집계를 다시 조회했습니다.');
-    }catch(e){setMessage(`${errorMessage(e)} · 편집 내용을 유지했습니다. 충돌 시 최신 개정을 확인한 뒤 다시 편집하세요.`);}finally{setBusy(false);setNavigationLocked(false);}
-  };
+      pending.current=null;setDrafts({});setEditing(false);setUnsavedChanges(false);await loadSpec();setMessage('저장했습니다. 서버의 절차·수행 결과·집계를 다시 조회했습니다.');return true;
+    }catch(e){setMessage(`${errorMessage(e)} · 편집 내용을 유지했습니다. 충돌 시 최신 개정을 확인한 뒤 다시 편집하세요.`);return false;}finally{setBusy(false);setNavigationLocked(false);}
+  },[spec,drafts,cases,executions,base,loadSpec,setUnsavedChanges,setNavigationLocked]);
+  useEffect(()=>{saveBeforeLeaveRef.current=adding?null:save;return()=>{saveBeforeLeaveRef.current=null;};},[saveBeforeLeaveRef,save,adding]);
   const createSpec=async()=>{
     const run=runs.find(r=>r.id===runId);if(!run)return;setBusy(true);
     try{const created=await api<Spec>(`${base}/test-specifications`,jsonRequest('POST',{verification_run_id:run.id,requirement_ids:run.requirement_versions.map(r=>r.requirement_id)}));await loadLists();setSpecId(created.id);setMessage('빈 수동 사양서를 만들었습니다. 시험을 직접 추가하세요.');}
@@ -132,7 +133,7 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
     </form></Card>}
     <div className="grid lg:grid-cols-[260px_1fr] gap-5">
       <Card title="시험 목록"><select aria-label="시험 요구사항 필터" className={inputClass} value={filter} disabled={editing} onChange={e=>setFilter(e.target.value)}><option value="">전체 요구사항</option>{requirements.map(r=><option key={r.id} value={r.id}>{r.title}</option>)}</select><div className="mt-3 space-y-2">{visible.map(c=><button key={c.id} disabled={busy} className={`w-full text-left border rounded p-3 text-sm ${active?.id===c.id?'bg-blue-50 border-blue-400':''}`} onClick={()=>setActiveId(c.id)}>{c.test_no}<strong className="block">{c.title}</strong><small>{statusLabels[(executions[c.id]?.status||'not_run') as keyof typeof statusLabels]} · 개정 {c.revision}{drafts[c.id]?.procedureChanged||drafts[c.id]?.executionChanged?' · 미저장':''}</small></button>)}</div></Card>
-      <Card title={active?.title||'등록된 시험이 없습니다'} extra={active&&!adding?(editing?<div className="flex gap-2"><Button disabled={busy||!changed} onClick={save}>저장</Button><Button variant="secondary" disabled={busy} onClick={()=>{setDrafts({});setEditing(false);setUnsavedChanges(false);}}>취소</Button></div>:<Button aria-label="시험 표 편집" disabled={busy} onClick={()=>setEditing(true)}>✎ 편집</Button>):undefined}>
+      <Card title={active?.title||'등록된 시험이 없습니다'} extra={active&&!adding?(editing?<div className="flex gap-2"><Button disabled={busy||!changed} onClick={save}>저장</Button><Button variant="secondary" disabled={busy} onClick={()=>{setDrafts({});setEditing(false);setUnsavedChanges(false);void loadSpec().catch(e=>setMessage(errorMessage(e)));}}>취소</Button></div>:<Button aria-label="시험 표 편집" disabled={busy} onClick={()=>setEditing(true)}>✎ 편집</Button>):undefined}>
         {active&&(()=>{const draft=draftFor(active);const steps=editing?draft.steps:active.steps;return <div className="space-y-4">
           <p className="text-sm">코드 예측: {active.prediction?.status==='unknown'?'미예측':active.prediction?.status||'미예측'} · {active.prediction?.reason||'없음'}</p>
           {draft.procedureChanged&&<p className="text-amber-700 text-sm">절차를 변경했습니다. 이전 수행 결과를 새 절차에 적용하지 않습니다.</p>}

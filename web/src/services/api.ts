@@ -246,7 +246,7 @@ export const verifyLLMConnection = async (projectId: string, configVersion: numb
 };
 
 export const fetchTestCases = async (projectId: string, specId: string) => {
-  const res = await fetch(`${BASE_URL}/projects/${projectId}/test-cases?test_specification_id=${specId}`);
+  const res = await fetch(`${BASE_URL}/projects/${projectId}/test-cases?test_specification_id=${specId}&limit=200`);
   const data = await handleResponse(res);
   return data.items || [];
 };

@@ -10,6 +10,7 @@ type Req = RequirementItem & {revision:number;subtopic_id:string};
 interface Run {id:string;created_at:string;status:string;requirement_versions:{requirement_id:string;revision:number}[]}
 interface Draft {title:string;preconditions:string;steps:TestStep[];results:StepResult[];procedureChanged:boolean;executionChanged:boolean}
 const inputClass='w-full border border-slate-200 rounded p-2 text-sm bg-white';
+const predictionLabels:Record<string,string>={normal_expected:'정상 예상',failure_expected:'실패 예상',needs_review:'확인 필요',unknown:'미예측'};
 const statusLabels={not_run:'미실행',passed:'통과',failed:'실패',on_hold:'보류'};
 const resultFor=(step_key:string):StepResult=>({step_key,status:'not_run',actual:'',notes:'',performed_at:null});
 const sectionLabels={login:'로그인',signup:'회원가입',password_find:'비밀번호찾기',notice:'공지사항',mypage:'마이페이지',authorization:'권한',general:'기타 기능'};
@@ -135,7 +136,7 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
       <Card title="시험 목록"><select aria-label="시험 요구사항 필터" className={inputClass} value={filter} disabled={editing} onChange={e=>setFilter(e.target.value)}><option value="">전체 요구사항</option>{requirements.map(r=><option key={r.id} value={r.id}>{r.title}</option>)}</select><div className="mt-3 space-y-2">{visible.map(c=><button key={c.id} disabled={busy} className={`w-full text-left border rounded p-3 text-sm ${active?.id===c.id?'bg-blue-50 border-blue-400':''}`} onClick={()=>setActiveId(c.id)}>{c.test_no}<strong className="block">{c.title}</strong><small>{statusLabels[(executions[c.id]?.status||'not_run') as keyof typeof statusLabels]} · 개정 {c.revision}{drafts[c.id]?.procedureChanged||drafts[c.id]?.executionChanged?' · 미저장':''}</small></button>)}</div></Card>
       <Card title={active?.title||'등록된 시험이 없습니다'} extra={active&&!adding?(editing?<div className="flex gap-2"><Button disabled={busy||!changed} onClick={save}>저장</Button><Button variant="secondary" disabled={busy} onClick={()=>{setDrafts({});setEditing(false);setUnsavedChanges(false);void loadSpec().catch(e=>setMessage(errorMessage(e)));}}>취소</Button></div>:<Button aria-label="시험 표 편집" disabled={busy} onClick={()=>setEditing(true)}>✎ 편집</Button>):undefined}>
         {active&&(()=>{const draft=draftFor(active);const steps=editing?draft.steps:active.steps;return <div className="space-y-4">
-          <p className="text-sm">코드 예측: {active.prediction?.status==='unknown'?'미예측':active.prediction?.status||'미예측'} · {active.prediction?.reason||'없음'}</p>
+          <p className="text-sm">코드 예측: {predictionLabels[active.prediction?.status||'unknown']||'확인 필요'} · {active.prediction?.reason||'없음'}</p>
           {draft.procedureChanged&&<p className="text-amber-700 text-sm">절차를 변경했습니다. 이전 수행 결과를 새 절차에 적용하지 않습니다.</p>}
           {editing&&<label>시험 제목<input aria-label="편집 시험 제목" className={inputClass} value={draft.title} onChange={e=>changeProcedure(active.id,{title:e.target.value})}/></label>}
           {steps.map((step,i)=>{const result=editing?draft.results.find(r=>r.step_key===step.step_key):executions[active.id]?.step_results.find(r=>r.step_key===step.step_key);return <fieldset key={step.step_key} className="border rounded p-4 space-y-3"><legend>단계 {i+1}</legend>

@@ -1,5 +1,7 @@
 import React from 'react';
 import { Card, Button } from '../common';
+import { SpecPageViewer } from './SpecPageViewer';
+import { BASE_URL } from '../../services/api';
 import type { Requirement, SourceRef } from '../../types/verification';
 
 interface ConditionVerdict {
@@ -19,12 +21,13 @@ interface VerificationData {
 }
 
 interface RequirementPanelProps {
+  projectId: string;
   requirement: Requirement;
   verificationData?: VerificationData;
   onReview?: () => void;
 }
 
-export const RequirementPanel: React.FC<RequirementPanelProps> = ({ requirement, verificationData, onReview }) => {
+export const RequirementPanel: React.FC<RequirementPanelProps> = ({ projectId, requirement, verificationData, onReview }) => {
   const primaryRef: SourceRef | undefined = requirement.source_refs?.[0];
   const pageIndex = primaryRef?.location?.index || 0;
   const bbox = primaryRef?.location?.bbox;
@@ -54,7 +57,7 @@ export const RequirementPanel: React.FC<RequirementPanelProps> = ({ requirement,
   }).filter(Boolean) as { key: string; label: string; total: number; implemented: number }[];
 
   return (
-    <div className="w-[320px] shrink-0 space-y-6">
+    <div className="w-full md:w-[44%] shrink-0 space-y-6">
       <Card className="p-6 flex flex-col gap-6">
         <div>
           <h3 className="text-lg font-bold text-slate-900 mb-1">요구사항</h3>
@@ -66,8 +69,9 @@ export const RequirementPanel: React.FC<RequirementPanelProps> = ({ requirement,
           </p>
         </div>
 
-        {primaryRef && (
-          <div className="border-t border-slate-100 pt-6">
+        {requirement.document_id && pageIndex > 0 && <section className="border-t border-slate-100 pt-4"><h4 className="text-sm font-bold mb-2">기획서 원본 · {pageIndex}쪽</h4><SpecPageViewer fileUrl={`${BASE_URL}/projects/${projectId}/documents/${requirement.document_id}/file`} page={pageIndex} bbox={bbox} /></section>}
+
+        {primaryRef && (<div className="border-t border-slate-100 pt-6">
             <h4 className="text-sm font-bold text-slate-900 mb-3">
               기획서 원문 발췌 (PDF {pageIndex}페이지)
             </h4>

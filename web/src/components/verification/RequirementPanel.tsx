@@ -69,10 +69,9 @@ export const RequirementPanel: React.FC<RequirementPanelProps> = ({ projectId, r
           </p>
         </div>
 
-        {primaryRef && (
-          {requirement.document_id && pageIndex > 0 && <section className="border-t border-slate-100 pt-4"><h4 className="text-sm font-bold mb-2">기획서 원본 · {pageIndex}쪽</h4><SpecPageViewer fileUrl={`${BASE_URL}/projects/${projectId}/documents/${requirement.document_id}/file`} page={pageIndex} bbox={bbox} /></section>}
+        {requirement.document_id && pageIndex > 0 && <section className="border-t border-slate-100 pt-4"><h4 className="text-sm font-bold mb-2">기획서 원본 · {pageIndex}쪽</h4><SpecPageViewer fileUrl={`${BASE_URL}/projects/${projectId}/documents/${requirement.document_id}/file`} page={pageIndex} bbox={bbox} /></section>}
 
-        <div className="border-t border-slate-100 pt-6">
+        {primaryRef && (<div className="border-t border-slate-100 pt-6">
             <h4 className="text-sm font-bold text-slate-900 mb-3">
               기획서 원문 발췌 (PDF {pageIndex}페이지)
             </h4>

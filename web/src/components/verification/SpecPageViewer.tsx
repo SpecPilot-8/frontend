@@ -53,7 +53,7 @@ export const SpecPageViewer: React.FC<SpecPageViewerProps> = ({ fileUrl, page, b
         canvas.height = viewport.height;
         canvas.style.width = `${width}px`;
         canvas.style.height = `${base.height * s}px`;
-        renderTask = pdfPage.render({ canvas, canvasContext: canvas.getContext("2d")!, viewport });
+        renderTask = pdfPage.render({ canvasContext: canvas.getContext("2d")!, viewport });
         return renderTask.promise.then(() => {
           if (cancelled) return;
           setScale(s);

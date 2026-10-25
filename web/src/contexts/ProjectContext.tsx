@@ -1,8 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
-import { createContext, useContext, useState } from "react";
-import type { ReactNode } from "react";
+import { createContext, useContext, useState, useRef } from "react";
+import type { ReactNode, MutableRefObject } from "react";
 
 interface ProjectContextType {
+  saveBeforeLeaveRef: MutableRefObject<(() => Promise<boolean>) | null>;
   projectId: string | null;
   unsavedChanges: boolean;
   setUnsavedChanges: (value: boolean) => void;
@@ -16,6 +17,7 @@ const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 export const ProjectProvider = ({ children }: { children: ReactNode }) => {
   const [projectId, setProjectId] = useState<string | null>(() => localStorage.getItem("specpilot.projectId"));
 
+  const saveBeforeLeaveRef = useRef<(() => Promise<boolean>) | null>(null);
   const [unsavedChanges,setUnsavedChanges] = useState(false);
   const [navigationLocked,setNavigationLocked] = useState(false);
   const selectProject = (id: string | null) => {
@@ -24,7 +26,7 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
     setProjectId(id);
   };
   return (
-    <ProjectContext.Provider value={{ projectId, setProjectId: selectProject, unsavedChanges, setUnsavedChanges, navigationLocked, setNavigationLocked }}>
+    <ProjectContext.Provider value={{ saveBeforeLeaveRef, projectId, setProjectId: selectProject, unsavedChanges, setUnsavedChanges, navigationLocked, setNavigationLocked }}>
       {children}
     </ProjectContext.Provider>
   );

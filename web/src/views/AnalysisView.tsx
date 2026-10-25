@@ -13,7 +13,7 @@ const field = 'w-full border border-slate-200 rounded-lg p-2 text-sm bg-white';
 const blankCondition = (): Condition => ({ stable_key: crypto.randomUUID(), text: '', category: 'business_logic', target: 'unknown', verifiable: 'code', source_refs: [] });
 
 export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> = ({ onNavigateStep }) => {
-  const { projectId, setUnsavedChanges } = useProject();
+  const { projectId, setUnsavedChanges, saveBeforeLeaveRef } = useProject();
   const [docs, setDocs] = useState<Doc[]>([]);
   const [docId, setDocId] = useState('');
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -72,9 +72,9 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     setConditions(fresh ? [blankCondition()] : structuredClone(selected?.conditions || []));
     setEditing(true); setUnsavedChanges(true); setMessage('');
   };
-  const save = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!document) return;
+  const save = useCallback(async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    if (!document) return false;
     setBusy(true); setMessage('');
     try {
       const group = await api<{ subtopic_id: string }>(`${base}/documents/${docId}/requirement-groups`, jsonRequest('POST', {
@@ -88,9 +88,10 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
         conditions: clean.map(c => ({ ...c, source_refs: source ? [{ block_id: source.id, quote: source.text }] : [] })),
       } : { base_revision: selected?.revision, subtopic_id: group.subtopic_id, title: title.trim(), conditions: clean };
       const saved = await api<Req>(`${base}/requirements${isNew ? '' : `/${selectedId}`}`, jsonRequest(isNew ? 'POST' : 'PATCH', data));
-      await load(); setSelectedId(saved.id); setEditing(false); setUnsavedChanges(false); setMessage('저장했습니다. 변경된 조건을 확인한 뒤 검토를 확정하세요.');
-    } catch (e) { setMessage(errorMessage(e)); } finally { setBusy(false); }
-  };
+      await load(); setSelectedId(saved.id); setEditing(false); setUnsavedChanges(false); setMessage('저장했습니다. 변경된 조건을 확인한 뒤 검토를 확정하세요.'); return true;
+    } catch (e) { setMessage(errorMessage(e)); return false; } finally { setBusy(false); }
+  }, [document,base,docId,topic,subtopic,conditions,isNew,source,title,selected,selectedId,load,setUnsavedChanges]);
+  useEffect(()=>{saveBeforeLeaveRef.current=editing?save:null;return()=>{saveBeforeLeaveRef.current=null;};},[saveBeforeLeaveRef,save,editing]);
   const parse = async () => {
     if (!document) return;
     setBusy(true); setMessage('문서의 화면 표와 원문을 읽고 있습니다.');

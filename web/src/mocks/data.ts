@@ -5,7 +5,6 @@ import type {
   RequirementItem,
   DocumentOutlineNode,
   VerificationResultItem,
-  TestSpecificationGroup,
 } from '../types';
 
 // AI 모델 목록
@@ -287,94 +286,4 @@ export const mockVerificationResults: VerificationResultItem[] = [
   },
 ];
 
-// 테스트 사양서
-export const mockTestSpecifications: Record<string, TestSpecificationGroup> = {
-  'NOTICE-002': {
-    requirementId: 'NOTICE-002',
-    groupTitle: '공지사항 신규 등록',
-    precondition: '관리자 로그인 (ROLE_ADMIN) · 공지사항 작성 화면 진입',
-    totalTests: 6,
-    testCases: [
-      {
-        id: 'TC-001',
-        procedure: '소용량 파일 첨부 후 공지 등록',
-        inputValue: '첨부파일: 25MB (sample.pdf)',
-        expected: 'HTTP 200 / 등록 완료 후 공지사항 목록 이동',
-        codeBasedPrediction: '정상 예상',
-        actualStatus: '미실행',
-      },
-      {
-        id: 'TC-002',
-        procedure: '중간 용량 파일 첨부 후 등록',
-        inputValue: '첨부파일: 250MB (archive.zip)',
-        expected: 'HTTP 200 / 등록 완료 후 공지사항 목록 이동',
-        codeBasedPrediction: '실패 예상',
-        actualStatus: '미실행',
-      },
-      {
-        id: 'TC-003',
-        procedure: '명세상 허용 한계 용량으로 등록',
-        inputValue: '첨부파일: 300MB (full_backup.zip)',
-        expected: 'HTTP 200 / 등록 완료 후 공지사항 목록 이동',
-        codeBasedPrediction: '실패 예상',
-        actualStatus: '미실행',
-      },
-      {
-        id: 'TC-004',
-        procedure: '용량 초과 파일 업로드 시도',
-        inputValue: '첨부파일: 301MB',
-        expected: 'HTTP 400 / "300MB 이하 파일만 업로드 가능합니다" 에러',
-        codeBasedPrediction: '실패 예상',
-        actualStatus: '미실행',
-      },
-      {
-        id: 'TC-005',
-        procedure: '제목 누락 상태로 등록 시도',
-        inputValue: '제목: "" (공백)',
-        expected: 'HTTP 400 / "제목은 필수입니다" 메시지 반환',
-        codeBasedPrediction: '정상 예상',
-        actualStatus: '미실행',
-      },
-      {
-        id: 'TC-006',
-        procedure: '비인가 사용자의 공지사항 등록 시도',
-        inputValue: 'ROLE_USER 계정으로 API 직접 호출',
-        expected: 'HTTP 403 Forbidden 반환',
-        codeBasedPrediction: '정상 예상',
-        actualStatus: '미실행',
-      },
-    ],
-  },
-  'LOGIN-003': {
-    requirementId: 'LOGIN-003',
-    groupTitle: '회원가입',
-    precondition: '비회원 상태 · 회원가입 화면 진입 · 이미 DB에 등록된 test@example.com 존재',
-    totalTests: 3,
-    testCases: [
-      {
-        id: 'SIGNUP-001',
-        procedure: '신규 고유 이메일로 회원가입',
-        inputValue: 'newuser2026@test.com / Pass1234!@',
-        expected: '계정 생성 완료 후 로그인 화면(/login) 이동',
-        codeBasedPrediction: '정상 예상',
-        actualStatus: '미실행',
-      },
-      {
-        id: 'SIGNUP-002',
-        procedure: '기존 가입 이메일로 중복 가입 시도',
-        inputValue: 'test@example.com / Pass1234!@',
-        expected: '가입 거절 및 "이미 가입된 이메일입니다" 안내 메시지 노출',
-        codeBasedPrediction: '실패 예상',
-        actualStatus: '미실행',
-      },
-      {
-        id: 'SIGNUP-003',
-        procedure: '잘못된 이메일 형식 입력',
-        inputValue: 'not-an-email-string / Pass1234!@',
-        expected: '유효성 검증 실패 안내 및 DB 저장 차단',
-        codeBasedPrediction: '정상 예상',
-        actualStatus: '미실행',
-      },
-    ],
-  },
-};
+// 테스트 사양서는 v2 steps[] API를 사용합니다. 실제 화면에 예시 시험을 주입하지 않습니다.

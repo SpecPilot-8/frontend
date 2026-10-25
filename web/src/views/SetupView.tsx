@@ -131,7 +131,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
   });
 
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || isSaving) return;
 
     Promise.all([
       fetchProjectSetup(projectId),
@@ -186,7 +186,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       .finally(() => {
         setIsLoading(false);
       });
-  }, [initialData, projectId, onProjectUpdated]);
+  }, [initialData, projectId, onProjectUpdated, isSaving]);
 
   const currentModel =
     aiModels.find((m) => m.id === setupData?.aiConfig.modelId) || aiModels[0];
@@ -291,7 +291,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
         }
 
         setCodeFile(null);
-        setIsUploaded(true);
+        setIsUploaded(Boolean(specFile || setupData.specFile?.fileName));
         alert("프로젝트 저장 및 파일 업로드가 완료되었습니다. 이제 AI API 연결을 확인해주세요.");
       } else {
         alert(`프로젝트 저장 실패: ${response.error || "알 수 없는 오류"}`);
@@ -494,6 +494,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
                     type="button"
                     variant={codeSourceTab === "GIT" ? "primary" : "secondary"}
                     size="sm"
+                    disabled
+                    title="원격 Git 가져오기는 후속 지원 예정입니다"
                     onClick={() => setCodeSourceTab("GIT")}
                   >
                     Git 저장소

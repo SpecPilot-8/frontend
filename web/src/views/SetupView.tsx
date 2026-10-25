@@ -106,7 +106,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       setSpecFile(selectedFile);
       handleUpdateField("specFile", {
         fileName: selectedFile.name,
-        pageCount: 1,
+        pageCount: undefined,
         version: "v1.0",
         uploaded: false,
       });
@@ -135,8 +135,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
     Promise.all([
       fetchProjectSetup(projectId),
-      fetchAll<{ id: string; filename?: string; revision?: number; file_count?: number }>(`/projects/${projectId}/documents`).then(items => ({ items: items.reverse() })),
-      fetchAll<{ id: string; filename?: string; revision?: number; file_count?: number }>(`/projects/${projectId}/code/snapshots`).then(items => ({ items: items.reverse() })),
+      fetchAll<{ id: string; filename?: string; revision?: number; page_count?: number; file_count?: number }>(`/projects/${projectId}/documents`).then(items => ({ items: items.reverse() })),
+      fetchAll<{ id: string; filename?: string; revision?: number; page_count?: number; file_count?: number }>(`/projects/${projectId}/code/snapshots`).then(items => ({ items: items.reverse() })),
       api<{ profile_id: string; config_version: number; connection_status: string }>(`/projects/${projectId}/llm`),
     ])
       .then(([setup, docsData, codeData, llmData]) => {
@@ -160,7 +160,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
             const doc = docsData.items[0];
             updatedSetup.specFile = {
               fileName: doc.filename || "기존_업로드된_기획서.pdf",
-              pageCount: 1,
+              uploaded: true,
+              pageCount: doc.page_count,
               version: `v${doc.revision || 1}.0`,
             };
             setIsUploaded(true);
@@ -393,6 +394,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
               <div className="space-y-1.5">
                 <label className={VIEW_HEADER.fieldLabel}>프로젝트 이름</label>
                 <Input
+                  aria-label="프로젝트 이름"
                   type="text"
                   value={setupData.projectName || ""}
                   placeholder="프로젝트 이름을 입력하세요"
@@ -422,7 +424,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
                   <label className={VIEW_HEADER.fieldLabel}>명세 문서</label>
                   {isSpecUploaded && (
                     <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
-                      업로드 완료
+                      {setupData.specFile?.uploaded ? "업로드 완료" : "파일 선택됨 · 저장 전"}
                     </span>
                   )}
                 </div>
@@ -794,7 +796,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <div className="text-xs font-semibold text-slate-800">
-            파일 저장과 AI 연결 검증이 끝났다면 명세 분석을 시작하세요.
+            파일 저장 후 명세 분석을 시작할 수 있습니다. AI 미연결 시 원문 검토와 수동 작성을 이용하세요.
           </div>
           <div className="text-[11px] text-slate-400 mt-0.5">
             검증 항목: 입력값 · 경로 및 이동 · 비즈니스 로직 · 데이터 저장 ·

@@ -59,7 +59,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
   onBack,
   onNavigateStep,
 }) => {
-  const { projectId } = useProject();
+  const { projectId, setAnalysisTarget } = useProject();
   const [error,setError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -148,7 +148,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
       </div>
 
       <div className="flex flex-col md:flex-row gap-6 items-start">
-        <RequirementPanel projectId={projectId || ""} requirement={requirement} verificationData={verificationData} onReview={() => onNavigateStep("ANALYSIS")} />
+        <RequirementPanel projectId={projectId || ""} requirement={requirement} verificationData={verificationData} onReview={() => { setAnalysisTarget({ requirementId, documentId: requirement.document_id || "", revision: requirementRevision }); onNavigateStep("ANALYSIS"); }} />
 
         <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-6 w-full">
           <div className="flex justify-between items-end mb-6 border-b border-slate-100 pb-4">

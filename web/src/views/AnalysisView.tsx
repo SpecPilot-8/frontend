@@ -16,7 +16,8 @@ const field = 'w-full border border-slate-200 rounded-lg p-2 text-sm bg-white';
 const blankCondition = (): Condition => ({ stable_key: crypto.randomUUID(), text: '', category: 'business_logic', target: 'unknown', verifiable: 'code', source_refs: [] });
 
 export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> = ({ onNavigateStep }) => {
-  const { projectId, setUnsavedChanges, saveBeforeLeaveRef } = useProject();
+  const { projectId, setUnsavedChanges, saveBeforeLeaveRef, analysisTarget, setAnalysisTarget } = useProject();
+  const [reviewFocus] = useState(analysisTarget);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [docId, setDocId] = useState('');
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -56,15 +57,17 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     const pending = jobs.find(j => j.operation === 'extract_requirements' && j.document_id === docId && ['queued', 'running'].includes(j.status));
     if (pending) setActiveJobId(pending.id);
     setDocs(documents.reverse()); setBlocks(original); setGroups(grouped.topics); setReqs(requirements);
-    setSelectedId(prev => requirements.some(r => r.id === prev) ? prev : (requirements[0]?.id || ''));
-  }, [projectId, docId]);
+    setSelectedId(prev => requirements.some(r => r.id === prev) ? prev : (requirements.find(r => r.id === reviewFocus?.requirementId)?.id || requirements[0]?.id || ''));
+    const focused = requirements.find(r => r.id === reviewFocus?.requirementId);
+    if (focused?.source_refs[0]?.block_id) setBlockId(prev => prev || focused.source_refs[0].block_id);
+  }, [projectId, docId, reviewFocus]);
   useEffect(() => {
     let active = true;
     if (projectId) fetchAll<Doc>(`/projects/${projectId}/documents`).then(items => {
-      if (active) { setDocs(items.reverse()); setDocId(items[0]?.id || ''); }
+      if (active) { setDocs(items.reverse()); setDocId(items.find(d => d.id === reviewFocus?.documentId)?.id || items[0]?.id || ''); setAnalysisTarget(null); }
     }).catch(e => active && setMessage(errorMessage(e)));
     return () => { active = false; };
-  }, [projectId]);
+  }, [projectId, reviewFocus, setAnalysisTarget]);
   useEffect(() => { void Promise.resolve().then(load).catch(e => setMessage(errorMessage(e))); }, [load]);
   useEffect(() => {
     if (!activeJobId || !projectId) return;
@@ -433,6 +436,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
           </div>
         </div>
       </div>
+    {reviewFocus && selected?.id === reviewFocus.requirementId && <p className="p-3 rounded bg-slate-100 text-sm">검증에서 선택한 요구사항입니다. 판정 기준은 개정 {reviewFocus.revision}이며, 여기서는 현재 개정 {selected.revision}을 검토합니다. 수정 내용은 새 검증 실행부터 반영됩니다.</p>}
     {document && blocks.length > 0 && <p className="text-sm text-slate-600">원문 {blocks.length}개 블록을 읽었습니다. {document.parse_status === 'partial' ? '일부 항목은 원문 확인이 필요합니다.' : '문서 읽기를 마쳤습니다.'}</p>}
     {reqs.length > 0 && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">저장된 요구사항 {reqs.length}개 · 수락 조건 {reqs.reduce((sum, r) => sum + r.conditions.length, 0)}개. 원문과 비교한 뒤 검토를 확정하세요.</p>}
     {document?.parser_version && document.parser_version !== 'pdf-layout-2' && <p className="text-sm text-amber-800">이전 OCR 결과입니다. 한국어 OCR 설정을 적용한 뒤 ‘문서 다시 파싱’을 눌러주세요. 저장된 요구사항이 있다면 새 문서로 등록해야 합니다.</p>}

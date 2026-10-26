@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { RequirementPanel } from "./RequirementPanel";
-import { Button } from "../common";
+import { Button, CodeBlock } from "../common";
+import { CodeViewerModal, type CodeEvidence } from "./CodeViewerModal";
 import { useProject } from "../../contexts/ProjectContext";
 import { api, errorMessage } from "../../services/api";
 import type { Requirement } from "../../types/verification";
@@ -21,6 +22,7 @@ interface EvidenceItem {
   start_line: number;
   end_line: number;
   role: string;
+  scope?: string;
   explanation: string;
   code_snippet: string;
   suggested_code?: string;
@@ -69,6 +71,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
   const [openEvidenceIds, setOpenEvidenceIds] = useState<Set<string>>(
     new Set(),
   );
+  const [modalEvidence, setModalEvidence] = useState<CodeEvidence | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -251,19 +254,46 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                       id={`evidence-content-${ev.id}`}
                       className={`min-w-0 p-4 bg-white border-t ${isProblem ? "border-red-100" : "border-blue-100"}`}
                     >
-                      <p
-                        className={`text-[13px] font-bold mb-2 ${isProblem ? "text-red-500" : "text-blue-500"}`}
-                      >
-                        코드 스니펫
-                      </p>
+                      <div className="flex items-center justify-between mb-2">
+                        <p
+                          className={`text-[13px] font-bold ${isProblem ? "text-red-500" : "text-blue-500"}`}
+                        >
+                          코드 스니펫 (L{ev.start_line}~L{ev.end_line})
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setModalEvidence({
+                            ...ev,
+                            scope: ev.scope || (ev.role === 'problem' ? 'this_screen' : 'other_screen'),
+                          })}
+                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
+                          title="팝업창으로 코드 크게 보기"
+                        >
+                          <span>🔍</span>
+                          <span>팝업으로 크게 보기</span>
+                        </button>
+                      </div>
+
                       <div
-                        tabIndex={0}
-                        aria-label={`${ev.file_path} 코드 스니펫`}
-                        className={`${isProblem ? "bg-red-50/50 border-red-100" : "bg-slate-50 border-slate-200"} max-w-full rounded-md p-4 mb-4 border overflow-x-auto font-mono text-[13px] leading-relaxed text-slate-800`}
+                        className="mb-4 cursor-pointer group relative"
+                        onClick={() => setModalEvidence({
+                          ...ev,
+                          scope: ev.scope || (ev.role === 'problem' ? 'this_screen' : 'other_screen'),
+                        })}
+                        title="클릭하여 팝업창으로 코드 크게 보기"
                       >
-                        <pre>
-                          <code>{ev.code_snippet}</code>
-                        </pre>
+                        <CodeBlock
+                          code={ev.code_snippet}
+                          filePath={ev.file_path}
+                          startLine={ev.start_line}
+                          maxLines={6}
+                          showLineNumbers={true}
+                        />
+                        <div className="absolute inset-0 bg-blue-500/0 group-hover:bg-blue-500/5 transition-colors rounded-lg pointer-events-none flex items-center justify-center">
+                          <span className="opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/80 text-white text-xs px-3 py-1.5 rounded-full shadow-lg font-medium backdrop-blur-xs">
+                            클릭하여 팝업으로 크게 보기 ↗
+                          </span>
+                        </div>
                       </div>
 
                       <p className="text-[13px] text-slate-600 mb-4 whitespace-pre-wrap [overflow-wrap:anywhere]">
@@ -271,16 +301,31 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                       </p>
 
                       {ev.suggested_code && (
-                        <>
-                          <p className="text-[13px] text-blue-600 font-bold mb-2">
-                            수정 제안
-                          </p>
-                          <div className="bg-slate-900 rounded-md p-4 overflow-x-auto font-mono text-[13px] leading-relaxed text-slate-300">
-                            <pre>
-                              <code>{ev.suggested_code}</code>
-                            </pre>
+                        <div className="mt-3">
+                          <div className="flex items-center justify-between mb-2">
+                            <p className="text-[13px] text-emerald-600 font-bold flex items-center gap-1">
+                              <span>✨ AI 수정 제안</span>
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => setModalEvidence({
+                                ...ev,
+                                scope: ev.scope || 'this_screen',
+                              })}
+                              className="text-xs text-emerald-700 hover:underline font-medium cursor-pointer"
+                            >
+                              팝업에서 비교 보기 ↗
+                            </button>
                           </div>
-                        </>
+                          <CodeBlock
+                            code={ev.suggested_code}
+                            filePath={ev.file_path}
+                            startLine={ev.start_line}
+                            maxLines={6}
+                            showLineNumbers={true}
+                            badge={{ text: '수정 권장안', variant: 'info' }}
+                          />
+                        </div>
                       )}
                     </div>
                   )}
@@ -290,6 +335,13 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
           </div>
         </div>
       </div>
+
+      <CodeViewerModal
+        isOpen={!!modalEvidence}
+        onClose={() => setModalEvidence(null)}
+        evidence={modalEvidence}
+        requirementTitle={requirement?.title}
+      />
     </div>
   );
 };

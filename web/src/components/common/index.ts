@@ -4,3 +4,4 @@ export * from './Input';
 export * from './StatusBadge';
 export * from './EmptyState';
 export * from './PageHeader';
+export * from './CodeBlock';

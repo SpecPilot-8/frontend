@@ -27,6 +27,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [activeJob, setActiveJob] = useState('');
+  const [cancellingJob, setCancellingJob] = useState(false);
   const [verifyProgress, setVerifyProgress] = useState<{ completed: number; total: number; stage?: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [scopeOptions, setScopeOptions] = useState<ScopeOptions | null>(null);
@@ -146,6 +147,25 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     }
   };
 
+  const cancelActiveJob = async () => {
+    if (!projectId || !activeJob || cancellingJob) return;
+    if (!window.confirm('진행 중인 코드 정합성 검증 작업을 중단하시겠습니까?')) return;
+    setCancellingJob(true);
+    try {
+      await api(`${base}/jobs/${activeJob}/cancel`, jsonRequest('POST', {}));
+      setMessage('코드 검증 작업을 사용자가 중단했습니다.');
+      setActiveJob('');
+      setVerifyProgress(null);
+      await load();
+      setRefresh(n => n + 1);
+    } catch (e) {
+      setMessage(`작업 중단 실패: ${errorMessage(e)}`);
+    } finally {
+      setCancellingJob(false);
+      setBusy(false);
+    }
+  };
+
   const start = async (scope: VerificationScope) => {
     if (!pendingInput) return;
     setBusy(true); setMessage('검증 작업을 접수하고 있습니다.');
@@ -176,6 +196,8 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       isOpen={!!activeJob}
       progress={verifyProgress}
       stageText={verifyProgress?.stage ? stages[verifyProgress.stage] || verifyProgress.stage : undefined}
+      onCancel={cancelActiveJob}
+      cancelling={cancellingJob}
     />
     <PageHeader stepTag="03 / VERIFICATION" title="검증 결과" description="선택한 실행의 요구사항 개정·코드 스냅샷을 기준으로 판정과 근거를 확인합니다." />
     {message && <p role="status" className="p-3 bg-blue-50 rounded text-sm">{message}</p>}

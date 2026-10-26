@@ -4,6 +4,8 @@ interface VerificationLoadingModalProps {
   isOpen: boolean;
   progress?: { completed: number; total: number; stage?: string } | null;
   stageText?: string;
+  onCancel?: () => void;
+  cancelling?: boolean;
 }
 
 const STAGES = [
@@ -16,6 +18,8 @@ export const VerificationLoadingModal: React.FC<VerificationLoadingModalProps> =
   isOpen,
   progress,
   stageText,
+  onCancel,
+  cancelling,
 }) => {
   if (!isOpen) return null;
 
@@ -122,11 +126,27 @@ export const VerificationLoadingModal: React.FC<VerificationLoadingModalProps> =
           </div>
         </div>
 
-        {/* 하단 안내 */}
+        {/* 하단 안내 및 중단 버튼 */}
         <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2.5 w-full text-left">
           <span className="font-semibold text-slate-700 mr-1.5">[안내]</span>
           대규모 소스코드 및 AST 정합성 판정에는 10~30초 가량 소요될 수 있습니다. 분석이 완료되면 자동으로 화면이 전환됩니다.
         </div>
+
+        {onCancel && (
+          <div className="pt-1 w-full flex justify-center">
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={cancelling}
+              className="px-4 py-2 text-xs font-semibold text-rose-600 hover:text-rose-700 bg-rose-50 hover:bg-rose-100/80 border border-rose-200 rounded-lg transition-colors cursor-pointer disabled:opacity-50 flex items-center gap-1.5"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+              <span>{cancelling ? '작업 중단 처리 중...' : '검증 작업 중단'}</span>
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -607,34 +607,19 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
                 disabled={busy || editing || visibleReqs.length === 0}
                 className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
               />
-              <span className="font-semibold">
-                전체 선택
-                <span className="ml-1 text-slate-500 font-normal">
-                  ({checkedCount > 0 ? `${checkedCount} / ${visibleReqs.length}개 선택됨` : `전체 ${visibleReqs.length}개`})
-                </span>
-              </span>
+              <span className="font-semibold text-slate-800">전체 선택</span>
             </label>
 
-            {checkedCount > 0 ? (
+            {checkedCount > 0 && (
               <button
                 type="button"
                 onClick={approveSelected}
                 disabled={busy || editing}
-                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-md shadow-2xs transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold text-xs rounded-md shadow-2xs transition-colors shrink-0 whitespace-nowrap cursor-pointer disabled:opacity-50"
               >
-                <span>선택 {checkedCount}개 검토 확정</span>
+                검토 확정
               </button>
-            ) : unapprovedReqs.length > 0 ? (
-              <button
-                type="button"
-                onClick={approveAll}
-                disabled={busy || editing}
-                className="text-[11px] text-slate-500 hover:text-emerald-700 font-medium underline cursor-pointer"
-                title="전체 미확정 요구사항 일괄 확정"
-              >
-                전체 {unapprovedReqs.length}개 확정
-              </button>
-            ) : null}
+            )}
           </div>
         )}
 
@@ -707,16 +692,6 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
             <Button onClick={approve} disabled={busy || selected.review_status==='approved'} variant={selected.review_status==='approved' ? 'secondary' : 'primary'}>
               {selected.review_status === 'approved' ? '✓ 검토 확정 완료' : '현재 요구사항 검토 확정'}
             </Button>
-            {unapprovedReqs.length > 0 && (
-              <Button
-                type="button"
-                onClick={approveAll}
-                disabled={busy}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium border-transparent ml-auto"
-              >
-                전체 검토 확정 ({unapprovedReqs.length}개 일괄)
-              </Button>
-            )}
           </div>
         </div> : <p className="text-sm text-slate-500">문서를 파싱한 뒤 원문을 선택해 수동 등록할 수 있습니다. 서버 모델 연결과 파싱 경고를 확인하면 AI 요구사항을 추출할 수 있습니다.</p>}
       </Card>

@@ -70,7 +70,7 @@ const Workspace: React.FC = () => {
             />
           )}
 
-          <main className="flex-1 overflow-y-auto bg-slate-50/60 p-4 md:p-6">
+          <main className="min-w-0 flex-1 overflow-y-auto bg-slate-50/60 p-4 md:p-6">
             {currentStep === 'HOME' && (
               <HomeView
                 onSelectProject={handleSelectProject}

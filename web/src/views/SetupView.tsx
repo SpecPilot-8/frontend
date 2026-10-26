@@ -19,7 +19,7 @@ import { VIEW_HEADER } from "../styles/typography";
 
 interface SetupViewProps {
   onNavigateStep: (step: StepId) => void;
-  onProjectUpdated?: (projectName: string) => void;
+  onProjectUpdated?: (projectName: string, techStack: string) => void;
   initialData?: ProjectSetupData;
 }
 
@@ -28,7 +28,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
   onProjectUpdated,
   initialData,
 }) => {
-  const { projectId, setProjectId, unsavedChanges, setUnsavedChanges, saveBeforeLeaveRef } = useProject();
+  const { projectId, setProjectId, unsavedChanges, setUnsavedChanges, saveBeforeLeaveRef, setNavigationLocked } = useProject();
 
   const [setupData, setSetupData] = useState<ProjectSetupData | null>(() => {
     if (initialData) return initialData;
@@ -64,6 +64,13 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
   const [specFile, setSpecFile] = useState<File | null>(null);
   const [codeFile, setCodeFile] = useState<File | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [loadAttempt, setLoadAttempt] = useState(0);
+
+  useEffect(() => {
+    setNavigationLocked(isSaving || connectionStatus === "CHECKING");
+    return () => setNavigationLocked(false);
+  }, [isSaving, connectionStatus, setNavigationLocked]);
 
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => {
@@ -126,7 +133,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
   });
 
   useEffect(() => {
-    if (!projectId || isSaving) return;
+    if (!projectId || isSaving || unsavedChanges) return;
+    let active = true;
 
     Promise.all([
       fetchProjectSetup(projectId),
@@ -135,6 +143,9 @@ export const SetupView: React.FC<SetupViewProps> = ({
       api<{ profile_id: string; config_version: number; connection_status: string }>(`/projects/${projectId}/llm`),
     ])
       .then(([setup, docsData, codeData, llmData]) => {
+        if (!active) return;
+        if (!setup) throw new Error("프로젝트 설정을 불러오지 못했습니다.");
+        setLoadError("");
         if (!initialData) {
           const updatedSetup: ProjectSetupData = {
             projectName: setup?.projectName || "",
@@ -173,16 +184,17 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
           setSetupData(updatedSetup);
           setUnsavedChanges(false);
-          onProjectUpdated?.(updatedSetup.projectName);
+          onProjectUpdated?.(updatedSetup.projectName, updatedSetup.techStack || "auto");
         }
       })
       .catch((err) => {
-        console.error(err);
+        if (active) setLoadError(err instanceof Error ? err.message : "프로젝트 설정을 불러오지 못했습니다.");
       })
       .finally(() => {
-        setIsLoading(false);
+        if (active) setIsLoading(false);
       });
-  }, [initialData, projectId, onProjectUpdated, isSaving, setUnsavedChanges]);
+    return () => { active = false; };
+  }, [initialData, projectId, onProjectUpdated, isSaving, unsavedChanges, setUnsavedChanges, loadAttempt]);
 
   const currentModel =
     modelProfiles.find((m) => m.id === "primary");
@@ -195,9 +207,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
     setUnsavedChanges(true);
     const updated = { ...setupData, [field]: value };
     setSetupData(updated);
-    if (field === "projectName" && typeof value === "string") {
-      onProjectUpdated?.(value);
-    }
   };
 
   const handleUpdateAiConfig = (
@@ -205,7 +214,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     value: string | boolean | number,
   ) => {
     if (!setupData) return;
-    setUnsavedChanges(true);
+    if (key === "modelId" || key === "apiKey") setUnsavedChanges(true);
     setSetupData(prev => prev ? ({ ...prev, aiConfig: { ...prev.aiConfig, [key]: value,
       ...((key === "modelId" || key === "apiKey") ? { isConnected: false } : {}) } }) : prev);
     if (key === "modelId" || key === "apiKey") {
@@ -215,6 +224,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
   };
 
   const handleSaveAndUpload = useCallback(async (): Promise<boolean> => {
+    if (isSaving) return false;
     if (!setupData || !setupData.projectName.trim()) {
       alert("프로젝트 이름을 입력해주세요.");
       return false;
@@ -232,11 +242,14 @@ export const SetupView: React.FC<SetupViewProps> = ({
         const saved = response.data as { version: number };
         setSetupData(prev => prev ? { ...prev, version: saved.version } : prev);
         setProjectId(newProjectId);
+        onProjectUpdated?.(setupData.projectName, setupData.techStack || "auto");
 
         if (specFile) {
           setSavingMessage("명세 문서를 서버에 업로드하는 중...");
           await uploadDocument(newProjectId, specFile);
           setSpecFile(null);
+          setIsUploaded(true);
+          setSetupData(prev => prev ? { ...prev, specFile: prev.specFile ? { ...prev.specFile, uploaded: true } : null } : prev);
         }
 
         if (codeSourceTab === "ZIP" && codeFile) {
@@ -306,7 +319,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       setIsSaving(false);
       setSavingMessage("");
     }
-  }, [setupData, projectId, specFile, codeSourceTab, codeFile, setProjectId, setUnsavedChanges]);
+  }, [setupData, projectId, specFile, codeSourceTab, codeFile, setProjectId, setUnsavedChanges, onProjectUpdated, isSaving]);
 
   useEffect(() => {
     saveBeforeLeaveRef.current = unsavedChanges ? handleSaveAndUpload : null;
@@ -362,6 +375,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
     onNavigateStep("ANALYSIS");
   };
 
+  if (loadError && !setupData) return <div role="alert" className="p-8 space-y-3 text-sm text-red-700"><p>{loadError}</p><Button onClick={() => { setIsLoading(true); setLoadAttempt(value => value + 1); }}>다시 불러오기</Button></div>;
+
   if (isLoading || !setupData) {
     return (
       <div className="max-w-6xl mx-auto py-12 text-center text-xs text-slate-400">
@@ -381,7 +396,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
         description="명세 문서와 검증할 코드를 연결하고 프로젝트를 준비하세요."
       />
 
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+      {loadError && <p role="alert" className="text-sm text-red-700">{loadError} 현재 입력은 유지됩니다.</p>}
+      <fieldset disabled={isSaving || connectionStatus === "CHECKING"} className="min-w-0 grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
         <div className="lg:col-span-8">
           <Card
             title="프로젝트와 분석 자료"
@@ -699,7 +715,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
             </div>
           </Card>
         </div>
-      </div>
+      </fieldset>
 
       <div className="bg-white rounded-2xl p-4 border border-slate-200/80 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -716,7 +732,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           variant="primary"
           size="lg"
           onClick={handleStartAnalysis}
-          disabled={!isUploaded}
+          disabled={!isUploaded || isSaving || connectionStatus === "CHECKING"}
           className="whitespace-nowrap"
         >
           명세 분석 시작

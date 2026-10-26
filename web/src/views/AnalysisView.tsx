@@ -38,6 +38,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   const [extractProgress, setExtractProgress] = useState<{ completed: number; total: number } | null>(null);
   const [acknowledgedFor, setAcknowledgedFor] = useState('');
   const [selectedPageFilter, setSelectedPageFilter] = useState<string>('all');
+  const [checkedReqIds, setCheckedReqIds] = useState<Set<string>>(new Set());
   const selected = reqs.find(r => r.id === selectedId);
   const document = docs.find(d => d.id === docId);
   const source = blocks.find(b => b.id === blockId);
@@ -107,10 +108,10 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     return () => window.removeEventListener('beforeunload', warn);
   }, [editing]);
 
-  const groupName = (r: Req) => {
+  const groupName = useCallback((r: Req) => {
     const t = groups.find(g => g.subtopics.some(s => s.id === r.subtopic_id));
     return `${t?.title || '미분류'} - ${t?.subtopics.find(s => s.id === r.subtopic_id)?.title || '기능 확인 필요'}`;
-  };
+  }, [groups]);
   const startEdit = (fresh: boolean) => {
     setIsNew(fresh); setTitle(fresh ? '' : selected?.title || '');
     const g = groups.find(g => g.subtopics.some(s => s.id === selected?.subtopic_id));
@@ -178,15 +179,95 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     setMessage(`요구사항 ${unapprovedReqs.length}개를 검토 확정하고 있습니다...`);
     let approved = 0;
     try {
-      for (const req of unapprovedReqs) {
-        await api(`${base}/requirements/${req.id}/review`, jsonRequest('PUT', { base_revision: req.revision, status: 'approved' }));
-        approved += 1;
+      try {
+        await api(`${base}/requirements/review-all`, jsonRequest('POST', {}));
+        approved = unapprovedReqs.length;
+      } catch {
+        for (const req of unapprovedReqs) {
+          await api(`${base}/requirements/${req.id}/review`, jsonRequest('PUT', { base_revision: req.revision, status: 'approved' }));
+          approved += 1;
+        }
       }
       await load();
+      setCheckedReqIds(new Set());
       setMessage(`이 문서의 요구사항 ${approved}개를 검토 확정했습니다.`);
     } catch (err) {
       await load().catch(() => undefined);
       setMessage(`${approved}개 저장 후 중단했습니다. 남은 미확정 항목을 확인하세요. ${errorMessage(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const visibleReqs = useMemo(() => {
+    return reqs.filter(r => `${r.title} ${groupName(r)}`.includes(search));
+  }, [reqs, search, groupName]);
+
+  const visibleUnapprovedReqs = useMemo(() => {
+    return visibleReqs.filter(r => r.review_status !== 'approved');
+  }, [visibleReqs]);
+
+  const isAllChecked = visibleUnapprovedReqs.length > 0 && visibleUnapprovedReqs.every(r => checkedReqIds.has(r.id));
+  const checkedCount = checkedReqIds.size;
+
+  const toggleCheckAll = () => {
+    if (isAllChecked) {
+      setCheckedReqIds(prev => {
+        const next = new Set(prev);
+        visibleUnapprovedReqs.forEach(r => next.delete(r.id));
+        return next;
+      });
+    } else {
+      setCheckedReqIds(prev => {
+        const next = new Set(prev);
+        visibleUnapprovedReqs.forEach(r => next.add(r.id));
+        return next;
+      });
+    }
+  };
+
+  const toggleCheckOne = (id: string) => {
+    setCheckedReqIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const approveSelected = async () => {
+    const targetReqs = reqs.filter(r => checkedReqIds.has(r.id) && r.review_status !== 'approved');
+    if (!targetReqs.length || editing || busy) {
+      alert('검토 확정할 미확정 요구사항을 체크박스로 선택해 주세요.');
+      return;
+    }
+    if (!window.confirm(`선택한 요구사항 ${targetReqs.length}개를 모두 검토 확정하시겠습니까?`)) return;
+    setBusy(true);
+    setMessage(`선택한 요구사항 ${targetReqs.length}개를 검토 확정하고 있습니다...`);
+    let approvedCount = 0;
+    try {
+      if (targetReqs.length === unapprovedReqs.length) {
+        try {
+          await api(`${base}/requirements/review-all`, jsonRequest('POST', {}));
+          approvedCount = targetReqs.length;
+        } catch {
+          for (const req of targetReqs) {
+            await api(`${base}/requirements/${req.id}/review`, jsonRequest('PUT', { base_revision: req.revision, status: 'approved' }));
+            approvedCount += 1;
+          }
+        }
+      } else {
+        for (const req of targetReqs) {
+          await api(`${base}/requirements/${req.id}/review`, jsonRequest('PUT', { base_revision: req.revision, status: 'approved' }));
+          approvedCount += 1;
+        }
+      }
+      await load();
+      setCheckedReqIds(new Set());
+      setMessage(`선택한 요구사항 ${approvedCount}개를 검토 확정했습니다.`);
+    } catch (err) {
+      await load().catch(() => undefined);
+      setMessage(`${approvedCount}개 확정 후 중단했습니다. 남은 항목을 확인하세요. ${errorMessage(err)}`);
     } finally {
       setBusy(false);
     }
@@ -512,25 +593,93 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
 
         <hr className="my-3 border-slate-100" />
 
-        {unapprovedReqs.length > 0 && (
-          <div className="mb-3">
-            <button
-              type="button"
-              onClick={approveAll}
-              disabled={busy || editing}
-              className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
-              title="미확정 요구사항을 한 번에 모두 확정합니다"
-            >
-              <svg className="w-4 h-4 text-emerald-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
-              </svg>
-              <span>미확정 {unapprovedReqs.length}개 전체 검토 확정</span>
-            </button>
+        <input aria-label="요구사항 검색" className={field} placeholder="요구사항 검색" value={search} onChange={e => setSearch(e.target.value)} />
+
+        {/* 상단 다중 선택 체크박스 바 */}
+        {reqs.length > 0 && (
+          <div className="flex items-center justify-between py-2 px-1 text-xs border-b border-slate-200 mt-2 mb-2 bg-slate-50/60 rounded-md">
+            <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 select-none">
+              <input
+                type="checkbox"
+                aria-label="요구사항 전체 선택"
+                checked={isAllChecked}
+                onChange={toggleCheckAll}
+                disabled={busy || editing || visibleUnapprovedReqs.length === 0}
+                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              />
+              <span className="font-semibold">
+                전체 선택
+                <span className="ml-1 text-slate-500 font-normal">
+                  ({checkedCount > 0 ? `${checkedCount}개 선택됨` : `미확정 ${visibleUnapprovedReqs.length}개`})
+                </span>
+              </span>
+            </label>
+
+            {checkedCount > 0 ? (
+              <button
+                type="button"
+                onClick={approveSelected}
+                disabled={busy || editing}
+                className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-md shadow-2xs transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+              >
+                <span>선택 {checkedCount}개 검토 확정</span>
+              </button>
+            ) : unapprovedReqs.length > 0 ? (
+              <button
+                type="button"
+                onClick={approveAll}
+                disabled={busy || editing}
+                className="text-[11px] text-slate-500 hover:text-emerald-700 font-medium underline cursor-pointer"
+                title="전체 미확정 요구사항 일괄 확정"
+              >
+                전체 {unapprovedReqs.length}개 확정
+              </button>
+            ) : null}
           </div>
         )}
 
-        <input aria-label="요구사항 검색" className={field} placeholder="요구사항 검색" value={search} onChange={e => setSearch(e.target.value)} />
-        <div className="mt-3 space-y-2 max-h-[500px] overflow-y-auto">{reqs.filter(r => `${r.title} ${groupName(r)}`.includes(search)).map(r => <button disabled={editing || busy} onClick={() => setSelectedId(r.id)} key={r.id} className={`w-full text-left p-3 rounded border text-sm transition-colors ${r.id === selectedId ? 'bg-blue-50 border-blue-400' : 'bg-white hover:bg-slate-50'}`}><small className="block text-slate-500">{groupName(r)}</small>{r.title}<small className={`block font-semibold mt-0.5 ${r.review_status === 'approved' ? 'text-emerald-600' : 'text-amber-600'}`}>{r.review_status === 'approved' ? '✓ 검토 확정' : '검토 필요'} · 개정 {r.revision}</small></button>)}</div>
+        <div className="mt-2 space-y-2 max-h-[500px] overflow-y-auto">
+          {visibleReqs.map(r => {
+            const isApproved = r.review_status === 'approved';
+            const isChecked = checkedReqIds.has(r.id);
+            const isSelected = r.id === selectedId;
+
+            return (
+              <div
+                key={r.id}
+                onClick={() => !editing && !busy && setSelectedId(r.id)}
+                className={`w-full flex items-start gap-2.5 p-3 rounded-lg border text-sm transition-all cursor-pointer ${
+                  isSelected
+                    ? 'bg-blue-50 border-blue-400 ring-1 ring-blue-400/40'
+                    : isChecked
+                    ? 'bg-emerald-50/40 border-emerald-300'
+                    : 'bg-white hover:bg-slate-50 border-slate-200'
+                }`}
+              >
+                <input
+                  type="checkbox"
+                  aria-label={`${r.title} 선택`}
+                  checked={isChecked}
+                  disabled={busy || editing}
+                  onClick={e => e.stopPropagation()}
+                  onChange={() => toggleCheckOne(r.id)}
+                  className="w-4 h-4 mt-1 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0"
+                />
+                <div className="flex-1 min-w-0">
+                  <small className="block text-slate-500 truncate">{groupName(r)}</small>
+                  <div className="font-medium text-slate-900 leading-snug break-words">{r.title}</div>
+                  <small className={`inline-block font-semibold mt-1 px-1.5 py-0.2 rounded text-[11px] ${
+                    isApproved
+                      ? 'text-emerald-700 bg-emerald-50 border border-emerald-200'
+                      : 'text-amber-700 bg-amber-50 border border-amber-200'
+                  }`}>
+                    {isApproved ? '검토 확정' : '검토 필요'} · 개정 {r.revision}
+                  </small>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </Card>
       <Card title={editing ? (isNew ? '요구사항 추가' : '요구사항 편집') : selected?.title || '등록된 요구사항이 없습니다'}>
         {editing ? <form onSubmit={save} className="space-y-3">

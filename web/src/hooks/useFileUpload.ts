@@ -11,12 +11,27 @@ export const useFileUpload = (options: FileUploadOptions = {}) => {
   const [isDragging, setIsDragging] = useState<boolean>(false);
   const inputRef = useRef<HTMLInputElement | null>(null);
 
+  const selectFile = (selectedFile: File) => {
+    const allowed = options.accept?.split(',').map(value => value.trim().toLowerCase()).filter(Boolean) || [];
+    const name = selectedFile.name.toLowerCase();
+    const type = selectedFile.type.toLowerCase();
+    const matches = allowed.length === 0 || allowed.some(value => value.startsWith('.')
+      ? name.endsWith(value)
+      : value.endsWith('/*') ? type.startsWith(value.slice(0, -1)) : type === value);
+    if (!matches) {
+      alert(`지원하는 파일 형식(${options.accept})을 선택해주세요. 선택한 파일: ${selectedFile.name}`);
+      return;
+    }
+    setFile(selectedFile);
+    options.onFileSelect?.(selectedFile);
+  };
+
   const handleFileChange = (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const selectedFile = e.target.files[0];
-      setFile(selectedFile);
-      options.onFileSelect?.(selectedFile);
+      selectFile(selectedFile);
     }
+    e.target.value = '';
   };
 
   const handleDragOver = (e: DragEvent) => {
@@ -34,8 +49,7 @@ export const useFileUpload = (options: FileUploadOptions = {}) => {
     setIsDragging(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const droppedFile = e.dataTransfer.files[0];
-      setFile(droppedFile);
-      options.onFileSelect?.(droppedFile);
+      selectFile(droppedFile);
     }
   };
 

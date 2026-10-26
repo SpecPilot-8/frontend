@@ -401,7 +401,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
               <svg className={`w-4 h-4 ${canExtract ? "text-amber-300 animate-spin" : "text-slate-300"}`} fill="currentColor" viewBox="0 0 20 20">
                 <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
               </svg>
-              <span>✨ AI 요구사항 추출</span>
+              <span>AI 요구사항 추출</span>
             </Button>
 
             {/* 보조: 수동 추가 버튼 */}
@@ -422,13 +422,13 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
           {/* 현재 추천 액션 가이드 텍스트 */}
           <div className="text-xs text-slate-500 self-center">
             {blocks.length === 0 && (
-              <span className="text-blue-600 font-medium">👉 먼저 [문서 파싱 시작]을 클릭하세요.</span>
+              <span className="text-blue-600 font-medium">먼저 [문서 파싱 시작]을 클릭하세요.</span>
             )}
             {blocks.length > 0 && reqs.length === 0 && !warningAccepted && (
-              <span className="text-amber-700 font-medium">👉 아래 경고 확인 체크박스를 선택하면 AI 추출이 활성화됩니다.</span>
+              <span className="text-amber-700 font-medium">아래 경고 확인 체크박스를 선택하면 AI 추출이 활성화됩니다.</span>
             )}
             {blocks.length > 0 && reqs.length === 0 && warningAccepted && (
-              <span className="text-indigo-600 font-medium animate-pulse">👉 준비 완료: [✨ AI 요구사항 추출]을 클릭하세요!</span>
+              <span className="text-indigo-600 font-medium animate-pulse">준비 완료: [AI 요구사항 추출]을 클릭하세요.</span>
             )}
             {reqs.length > 0 && (
               <span className="text-emerald-700 font-medium">✓ 요구사항을 검토·확정한 후 우측 상단 '검증 결과로 이동'을 누르세요.</span>
@@ -452,7 +452,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
           {availablePages.length > 1 && (
             <div>
               <label htmlFor="page-filter" className="block text-xs font-bold text-slate-700 mb-1.5">
-                📄 페이지(쪽수) 필터
+                페이지(쪽수) 필터
               </label>
               <select
                 id="page-filter"
@@ -472,7 +472,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
 
           <div>
             <label htmlFor="source-block-select" className="block text-xs font-bold text-slate-700 mb-1.5">
-              📌 원문 출처 블록 선택
+              원문 출처 블록 선택
             </label>
             <select
               id="source-block-select"

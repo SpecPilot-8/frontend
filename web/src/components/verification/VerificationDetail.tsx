@@ -266,10 +266,12 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                             ...ev,
                             scope: ev.scope || (ev.role === 'problem' ? 'this_screen' : 'other_screen'),
                           })}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
                           title="팝업창으로 코드 크게 보기"
                         >
-                          <span>🔍</span>
+                          <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
+                          </svg>
                           <span>팝업으로 크게 보기</span>
                         </button>
                       </div>
@@ -303,8 +305,8 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                       {ev.suggested_code && (
                         <div className="mt-3">
                           <div className="flex items-center justify-between mb-2">
-                            <p className="text-[13px] text-emerald-600 font-bold flex items-center gap-1">
-                              <span>✨ AI 수정 제안</span>
+                            <p className="text-[13px] text-emerald-700 font-bold">
+                              AI 수정 제안
                             </p>
                             <button
                               type="button"

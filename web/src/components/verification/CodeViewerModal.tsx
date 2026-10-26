@@ -122,7 +122,7 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
                   : 'border-transparent text-slate-500 hover:text-slate-800'
               }`}
             >
-              <span>✨ AI 수정 제안 코드</span>
+              <span>AI 수정 제안 코드</span>
               <span className="px-1.5 py-0.2 rounded text-[11px] bg-emerald-100 text-emerald-800 font-bold">권장</span>
             </button>
           </div>
@@ -163,7 +163,7 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
               isProblem ? 'bg-amber-50/80 border-amber-200 text-amber-900' : 'bg-blue-50/80 border-blue-200 text-blue-900'
             }`}>
               <div className="flex items-center gap-1.5 font-bold mb-1.5 text-xs uppercase tracking-wider">
-                <span>{isProblem ? '⚠️ 판정 사유 및 불일치 지점' : 'ℹ️ 코드 분석 내용'}</span>
+                <span>{isProblem ? '판정 사유 및 불일치 지점' : '코드 분석 내용'}</span>
               </div>
               <p className="whitespace-pre-wrap">{evidence.explanation}</p>
             </div>

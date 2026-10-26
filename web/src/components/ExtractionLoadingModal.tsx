@@ -84,8 +84,9 @@ export const ExtractionLoadingModal: React.FC<ExtractionLoadingModalProps> = ({
         </div>
 
         {/* 하단 안내 */}
-        <div className="text-[11px] text-slate-400 bg-blue-50/50 border border-blue-100 rounded-lg p-2.5 w-full">
-          💡 분석 중에는 브라우저 창을 닫지 마세요. 완료 후 원문과 비교 검토할 수 있도록 초안으로 안전하게 저장됩니다.
+        <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2.5 w-full">
+          <span className="font-semibold text-slate-700 mr-1.5">[안내]</span>
+          분석 중에는 브라우저 창을 닫지 마세요. 완료 후 원문과 비교 검토할 수 있도록 초안으로 안전하게 저장됩니다.
         </div>
       </div>
     </div>

@@ -133,17 +133,21 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
             <button
               type="button"
               onClick={handleCopy}
-              className="px-2 py-0.5 rounded bg-slate-700/80 hover:bg-slate-600 text-slate-200 text-xs transition-colors cursor-pointer flex items-center gap-1"
+              className="px-2 py-0.5 rounded bg-slate-700/80 hover:bg-slate-600 text-slate-200 text-xs transition-colors cursor-pointer flex items-center gap-1.5"
               title="코드 복사"
             >
               {copied ? (
                 <>
-                  <span className="text-emerald-400">✓</span>
-                  <span>복사됨</span>
+                  <svg className="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <span className="text-emerald-400 font-medium">복사됨</span>
                 </>
               ) : (
                 <>
-                  <span>📋</span>
+                  <svg className="w-3.5 h-3.5 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
                   <span>복사</span>
                 </>
               )}

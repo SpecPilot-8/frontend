@@ -9,6 +9,7 @@ type Spec = TestSpecification & { requirement_versions: {requirement_id:string;r
 type Req = RequirementItem & {revision:number;subtopic_id:string};
 interface Run {id:string;created_at:string;status:string;requirement_versions:{requirement_id:string;revision:number}[]}
 interface GenerationJob {id:string;operation:string;status:string;progress?:{completed:number;total:number};result_ref?:{id:string};result?:{test_case_count:number;step_count:number};error?:{message:string};missing_features:{message:string}[]}
+interface GenerationPlan {model_config_version:number;requirement_count:number;subtopic_count:number;max_model_calls:number;provider:string;model:string;snapshot_id:string;verification_run_id:string;requirement_ids:string[];runDate:string}
 interface Draft {title:string;preconditions:string;steps:TestStep[];results:StepResult[];procedureChanged:boolean;executionChanged:boolean}
 const inputClass='w-full border border-slate-200 rounded p-2 text-sm bg-white';
 const predictionLabels:Record<string,string>={normal_expected:'정상 예상',failure_expected:'실패 예상',needs_review:'확인 필요',unknown:'미예측'};
@@ -34,6 +35,7 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [generationJobId,setGenerationJobId]=useState('');
+  const [generationPlan,setGenerationPlan]=useState<GenerationPlan|null>(null);
   const [adding,setAdding]=useState(false);
   const [newTitle,setNewTitle]=useState('');
   const [newReqId,setNewReqId]=useState('');
@@ -196,9 +198,16 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
     const run=runs.find(r=>r.id===runId);if(!run)return;setBusy(true);
     try{
       const body={verification_run_id:run.id,requirement_ids:run.requirement_versions.map(r=>r.requirement_id)};
-      const prepared=await api<{model_config_version:number;requirement_count:number;max_model_calls:number}>(`${base}/test-specifications/generate/prepare`,jsonRequest('POST',body));
-      if(!window.confirm(`확정된 요구사항 ${prepared.requirement_count}개의 테스트케이스를 생성합니다. 서버 모델에 명세·조건을 보내며 최대 ${prepared.max_model_calls}회 호출 비용이 발생할 수 있습니다. 기존 사양서는 유지하고 새 초안을 만듭니다. 진행하시겠습니까?`))return;
-      const job=await api<GenerationJob>(`${base}/test-specifications/generate`,jsonRequest('POST',{...body,model_config_version:prepared.model_config_version}));
+      const prepared=await api<Omit<GenerationPlan,'requirement_ids'|'runDate'>>(`${base}/test-specifications/generate/prepare`,jsonRequest('POST',body));
+      setGenerationPlan({...prepared,requirement_ids:body.requirement_ids,runDate:run.created_at});
+    }
+    catch(e){setMessage(errorMessage(e));}finally{setBusy(false);}
+  };
+  const startGeneration=async()=>{
+    if(!generationPlan)return;setBusy(true);
+    try{
+      const job=await api<GenerationJob>(`${base}/test-specifications/generate`,jsonRequest('POST',{verification_run_id:generationPlan.verification_run_id,requirement_ids:generationPlan.requirement_ids,model_config_version:generationPlan.model_config_version}));
+      setGenerationPlan(null);
       if(['queued','running'].includes(job.status))setGenerationJobId(job.id);
       else setMessage(job.error?.message||job.missing_features?.map(f=>f.message).join(' / ')||`생성 상태: ${job.status}`);
     }
@@ -218,13 +227,15 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
   if(!projectId)return <Button onClick={()=>onNavigateStep('SETUP')}>프로젝트를 선택하세요</Button>;
   return <div className="max-w-7xl mx-auto space-y-5">
     <PageHeader stepTag="04 / TEST SPECIFICATION" title="테스트 사양서" description="시험 절차와 실제 수행을 구분해 편집·저장하고 단계별 Excel을 출력합니다."/>
+    {generationPlan&&<div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4"><div role="dialog" aria-modal="true" aria-label="AI 테스트케이스 생성 확인" className="w-full max-w-lg bg-white p-6 rounded-xl space-y-4 shadow-xl"><h2 className="text-lg font-bold">AI 테스트케이스 생성 확인</h2><p className="text-sm">선택한 검증 실행: {generationPlan.runDate}<br/>코드 스냅샷: {generationPlan.snapshot_id.slice(0,8)}</p><p className="text-sm">검토 확정 요구사항 {generationPlan.requirement_count}개 · 소주제 {generationPlan.subtopic_count}개<br/>서버 모델: {generationPlan.provider} / {generationPlan.model}<br/>최대 모델 호출 {generationPlan.max_model_calls}회 · 호출 비용이 발생할 수 있습니다.</p><p className="text-sm text-slate-600">명세·조건을 모델에 보내 테스트 절차와 예상 결과를 작성합니다. 기존 사양서는 유지하고 새 초안을 저장합니다. 실제 수행 O/X는 생성하지 않습니다.</p><div className="flex gap-2"><Button disabled={busy} onClick={startGeneration}>확인한 범위로 생성 시작</Button><Button autoFocus variant="secondary" disabled={busy} onClick={()=>setGenerationPlan(null)}>생성 취소</Button></div></div></div>}
     {message&&<p role="status" className="bg-blue-50 p-3 rounded text-sm">{message}</p>}
     <div className="flex flex-wrap gap-2"><select aria-label="사양서 생성 기준 실행" className={inputClass+' max-w-sm'} value={runId} disabled={editing||adding||busy||!!generationJobId} onChange={e=>{setRunId(e.target.value);setMessage('');}}>{runs.map(r=><option key={r.id} value={r.id}>{r.created_at} · {r.status}</option>)}</select><Button disabled={!runId||busy||editing||adding||!!generationJobId} onClick={createSpec}>수동 사양서 만들기</Button><Button variant="secondary" disabled={runs.find(r=>r.id===runId)?.status!=='completed'||busy||editing||adding||!!generationJobId} onClick={generate}>AI 테스트케이스 생성</Button></div>
     {runs.length>0&&runs.find(r=>r.id===runId)?.status!=='completed'&&<p className="text-sm text-amber-700">AI 생성에는 코드 검증이 완료된 실행이 필요합니다. 수동 사양서는 현재 실행에서도 만들 수 있습니다.</p>}
     {!runs.length&&<p>먼저 요구사항을 검토 확정하고 검증을 접수하세요. 모델 미연결 실행에서도 수동 사양서를 작성할 수 있습니다.</p>}
     <div className="flex flex-wrap gap-2"><select aria-label="테스트 사양서 선택" value={specId} className={inputClass+' max-w-sm'} disabled={editing||adding||busy} onChange={e=>setSpecId(e.target.value)}>{specs.map(s=><option key={s.id} value={s.id}>{s.id.slice(0,8)} · 개정 {s.revision} · {s.status}</option>)}</select><Button disabled={!spec||busy||editing||adding} onClick={()=>setAdding(true)}>시험 수동 추가</Button><Button disabled={!spec||busy||editing||adding} onClick={exportExcel}>테스트 Excel 출력</Button></div>
     {summary&&<p className="text-sm">시나리오 {summary.scenario_summary.total}개 · 단계 {summary.step_summary.total}개 · 통과 {summary.step_summary.passed} / 실패 {summary.step_summary.failed} / 보류 {summary.step_summary.on_hold} / 미실행 {summary.step_summary.not_run}</p>}
-    {spec?.origin==='generated'&&<p className="text-sm text-amber-800">AI 생성 초안입니다. 예상 결과·입력값·누락 조건을 원문과 비교한 뒤 사용하세요. 코드 예측과 실제 수행 결과는 구분됩니다.</p>}
+    {spec?.origin==='generated'&&spec.generation_status==='completed'&&<p className="text-sm text-amber-800">AI 생성 초안입니다. 예상 결과·입력값·누락 조건을 원문과 비교한 뒤 사용하세요. 코드 예측과 실제 수행 결과는 구분됩니다.</p>}
+    {spec?.origin==='generated'&&spec.generation_status==='failed'&&<p className="text-sm text-red-700">이 사양서의 AI 생성은 실패했습니다. 기존 시험 기록은 유지됩니다. 다시 생성하려면 위의 AI 테스트케이스 생성을 선택하세요.</p>}
     {!!(spec?.warnings?.length||spec?.uncovered_conditions?.length)&&<details className="border rounded p-3 text-sm text-amber-800"><summary>생성 경고 {spec?.warnings?.length||0}건 · 미포함 조건 {spec?.uncovered_conditions?.length||0}개</summary>{spec?.warnings?.map((w,i)=><p key={`w-${i}`}>{w.message}</p>)}{spec?.uncovered_conditions?.map((u,i)=><p key={`u-${i}`}>{requirements.find(r=>r.id===u.requirement_id)?.title}: {u.reason}</p>)}</details>}
     {adding&&<Card title="시험 수동 추가"><form className="space-y-3" onSubmit={addCase}>
       <label>시험 이름<input aria-label="시험 이름" required className={inputClass} value={newTitle} onChange={e=>setNewTitle(e.target.value)}/></label>

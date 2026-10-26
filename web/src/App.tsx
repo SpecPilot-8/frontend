@@ -55,7 +55,7 @@ const Workspace: React.FC = () => {
         <Header
           currentStep={currentStep}
           onStepChange={navigate}
-          projectName={projectName}
+          projectName={currentStep === 'HOME' ? '프로젝트 선택' : projectName}
           subtitle="요구사항과 코드의 연결을 확인하는 워크스페이스"
         />
 

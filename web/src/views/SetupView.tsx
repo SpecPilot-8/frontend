@@ -529,7 +529,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
                           {setupData.codeSource?.fileCount
                             ? `${setupData.codeSource.fileCount}개 파일 · `
                             : ""}
-                          코드 스냅샷 {setupData.codeSource?.snapshotId}
+                          {setupData.codeSource?.snapshotId ? `코드 스냅샷 ${setupData.codeSource.snapshotId}` : "파일 선택됨 · 저장 전"}
                         </div>
                       </div>
                       <Button
@@ -595,13 +595,13 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
               <Button
                 type="button"
-                variant={isUploaded ? "secondary" : "primary"}
+                variant={isUploaded && !unsavedChanges ? "secondary" : "primary"}
                 size="lg"
                 onClick={handleSaveAndUpload}
                 disabled={isSaving}
                 className="whitespace-nowrap mt-4 sm:mt-0"
               >
-                {isSaving ? savingMessage || "처리 중..." : isUploaded ? "설정 및 파일 저장 완료" : "설정 및 파일 저장"}
+                {isSaving ? savingMessage || "처리 중..." : isUploaded && !unsavedChanges ? "설정 및 파일 저장 완료" : "설정 및 파일 저장"}
               </Button>
             </div>
           </Card>

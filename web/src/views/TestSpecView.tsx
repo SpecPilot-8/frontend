@@ -56,9 +56,9 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
     const pendingJob=jobs.find(j=>j.operation==='generate_test_specification'&&['queued','running'].includes(j.status));
     if(pendingJob)setGenerationJobId(pendingJob.id);
   },[projectId]);
-  const loadSpec=useCallback(async()=>{
-    if(!projectId||!specId)return;
-    const [current,items,stats]=await Promise.all([api<Spec>(`/projects/${projectId}/test-specifications/${specId}`),fetchAll<TestCase>(`/projects/${projectId}/test-cases?test_specification_id=${specId}`),api<{scenario_summary:Record<string,number>;step_summary:Record<string,number>}>(`/projects/${projectId}/test-specifications/${specId}/execution-summary`)]);
+  const loadSpecById=useCallback(async(targetId:string)=>{
+    if(!projectId||!targetId)return;
+    const [current,items,stats]=await Promise.all([api<Spec>(`/projects/${projectId}/test-specifications/${targetId}`),fetchAll<TestCase>(`/projects/${projectId}/test-cases?test_specification_id=${targetId}`),api<{scenario_summary:Record<string,number>;step_summary:Record<string,number>}>(`/projects/${projectId}/test-specifications/${targetId}/execution-summary`)]);
     const [reqs,records]=await Promise.all([
       Promise.all(current.requirement_versions.map(r=>api<Req>(`/projects/${projectId}/requirements/${r.requirement_id}?revision=${r.revision}`))),
       Promise.all(items.map(c=>fetchAll<TestExecution>(`/projects/${projectId}/test-cases/${c.id}/executions`))),
@@ -66,7 +66,8 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
     const latest:Record<string,TestExecution>={};
     items.forEach((c,i)=>{const e=records[i].filter(e=>e.test_case_revision===c.revision).sort((a,b)=>b.attempt_no-a.attempt_no)[0];if(e)latest[c.id]=e;});
     setSpecs(prev=>prev.map(s=>s.id===current.id?current:s));setCases(items);setRequirements(reqs);setExecutions(latest);setSummary(stats);setActiveId(prev=>items.some(c=>c.id===prev)?prev:items[0]?.id||'');setNewReqId(prev=>reqs.some(r=>r.id===prev)?prev:reqs[0]?.id||'');
-  },[projectId,specId]);
+  },[projectId]);
+  const loadSpec=useCallback(()=>loadSpecById(specId),[loadSpecById,specId]);
   useEffect(()=>{void Promise.resolve().then(loadLists).catch(e=>setMessage(errorMessage(e)));},[loadLists]);
   useEffect(()=>{void Promise.resolve().then(loadSpec).catch(e=>setMessage(errorMessage(e)));},[loadSpec]);
   useEffect(()=>{
@@ -82,7 +83,7 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
           if(['completed','failed','blocked','cancelled'].includes(job.status)){
             await loadLists();if(!active)return;
             if(job.status==='completed'&&job.result_ref){
-              setCases([]);setSummary(null);setRequirements([]);setExecutions({});setActiveId('');setFilter('');setSpecId(job.result_ref.id);
+              setCases([]);setSummary(null);setRequirements([]);setExecutions({});setActiveId('');setFilter('');setSpecId(job.result_ref.id);await loadSpecById(job.result_ref.id);if(!active)return;
               setMessage(`테스트케이스 ${job.result?.test_case_count||0}개 · 단계 ${job.result?.step_count||0}개를 새 사양서 초안에 저장했습니다. 원문과 비교해 검토하세요. 실제 수행 결과는 미실행입니다.`);
             }else setMessage(job.error?.message||job.missing_features?.map(f=>f.message).join(' / ')||`생성 상태: ${job.status}`);
             break;
@@ -93,7 +94,7 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
       finally{if(active){setBusy(false);setGenerationJobId('');}}
     });
     return()=>{active=false;controller.abort();};
-  },[generationJobId,projectId,loadLists]);
+  },[generationJobId,projectId,loadLists,loadSpecById]);
   const hasNewDraft = adding && (!!newTitle.trim() || newSteps.some(s => !!s.action.trim() || !!s.expected.trim() || !!s.input.trim()));
   const isDirty = changed || hasNewDraft;
   useEffect(()=>{

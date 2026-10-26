@@ -9,6 +9,7 @@ import {
   TestSpecView,
 } from './views';
 import { ProjectProvider, useProject } from './contexts/ProjectContext';
+import { projectStackLabel } from './projectStacks';
 
 const Workspace: React.FC = () => {
   const {unsavedChanges,setUnsavedChanges,navigationLocked,saveBeforeLeaveRef}=useProject();
@@ -32,8 +33,9 @@ const Workspace: React.FC = () => {
     navigate('SETUP');
   };
 
-  const handleProjectUpdated = useCallback((newProjectName: string) => {
+  const handleProjectUpdated = useCallback((newProjectName: string, stack: string) => {
     setProjectName(newProjectName);
+    setTechStack(projectStackLabel(stack));
   }, []);
 
   const handleSelectRequirementForTest = (reqId: string) => {
@@ -67,6 +69,7 @@ const Workspace: React.FC = () => {
               onSwitchProject={handleSwitchProject}
               projectName={projectName}
               techStack={techStack}
+              disabled={navigationLocked}
             />
           )}
 

@@ -7,6 +7,7 @@ interface SidebarProps {
   onSwitchProject?: () => void;
   projectName?: string;
   techStack?: string;
+  disabled?: boolean;
 }
 
 interface StepNavItem {
@@ -28,6 +29,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onSwitchProject,
   projectName = '새 프로젝트',
   techStack = '기술 스택 미지정',
+  disabled = false,
 }) => {
   return (
     <aside className="w-56 bg-white border-r border-slate-200/80 flex flex-col justify-between p-4 shrink-0 select-none">
@@ -53,6 +55,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <button
                 key={item.id}
                 type="button"
+                disabled={disabled}
                 onClick={() => onStepChange(item.id)}
                 className={`w-full flex items-center space-x-2 px-3 py-2 rounded-xl text-xs font-medium transition-all ${
                   isActive
@@ -77,6 +80,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </div>
         <button
           type="button"
+          disabled={disabled}
           onClick={onSwitchProject}
           className="w-full py-2 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors shadow-2xs"
         >

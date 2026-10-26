@@ -663,7 +663,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
             <p className="text-[11px] text-slate-400 leading-relaxed pt-2 border-t border-slate-100">
               프로젝트를 저장한 뒤 연결을 확인하세요. 짧은 테스트 요청 1회로 호출 비용이 발생할 수 있습니다. 문서와 코드는 보내지 않습니다.
             </p>
-            <p className="text-xs text-amber-700">연결 성공 후 명세 분석에서 요구사항을 자동 추출할 수 있습니다. 코드 자동 판정·테스트 자동 생성의 웹 실행 연결은 아직 준비 중입니다.</p>
+            <p className="text-xs text-amber-700">연결 성공 후 요구사항 추출과 코드 검증을 실행하고, 완료된 검증에서 AI 테스트케이스를 생성할 수 있습니다. 생성한 시험은 검토할 초안이며 실제 수행 결과와 구분됩니다.</p>
           </Card>
 
           <Card

@@ -1,13 +1,12 @@
 import { PROJECT_STACKS } from "../projectStacks";
 import React, { useState, useEffect } from "react";
-import type { StepId, AIModelOption, ProjectSetupData } from "../types";
+import type { StepId, ProjectSetupData } from "../types";
 import type { AIModelProfile } from "../types/project";
 import {
   fetchProjectSetup,
   saveProjectSetup,
   uploadDocument,
   pollJobStatus,
-  saveProjectCredentials,
   updateProjectLLMConfig,
   verifyLLMConnection,
   BASE_URL,
@@ -50,9 +49,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     return null;
   });
 
-  const [aiModels, setAiModels] = useState<AIModelOption[]>([]);
   const [modelProfiles, setModelProfiles] = useState<AIModelProfile[]>([]);
-  const [isDropdownOpen, setIsDropdownOpen] = useState<boolean>(false);
   const [codeSourceTab, setCodeSourceTab] = useState<"ZIP" | "GIT">("ZIP");
 
   const [connectionStatus, setConnectionStatus] = useState<
@@ -69,27 +66,9 @@ export const SetupView: React.FC<SetupViewProps> = ({
   const [codeFile, setCodeFile] = useState<File | null>(null);
 
   useEffect(() => {
-    fetch(`${BASE_URL}/model-profiles`)
-      .then((res) => (res.ok ? res.json() : { items: [] }))
-      .then((data) => {
-        if (data && data.items && data.items.length > 0) {
-          setModelProfiles(data.items);
-          setAiModels(
-            data.items.map((m: AIModelProfile) => ({
-              id: m.id,
-              name: m.display_name,
-              provider: m.provider,
-              enabled: m.enabled,
-            }))
-          );
-        } else {
-          setAiModels([{ id: "primary", name: "기본 모델 (연결 대기)", provider: "unconfigured", enabled: false }]);
-        }
-      })
-      .catch((err) => {
-        console.error("모델 목록 로드 실패:", err);
-        setAiModels([{ id: "primary", name: "기본 모델 (연결 대기)", provider: "unconfigured", enabled: false }]);
-      });
+    api<{ items: AIModelProfile[] }>("/model-profiles")
+      .then((data) => setModelProfiles(data.items))
+      .catch(() => setConnectionErrorMsg("서버 모델 설정을 불러오지 못했습니다. 백엔드 연결을 확인하세요."));
   }, []);
 
   const {
@@ -189,7 +168,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
   }, [initialData, projectId, onProjectUpdated, isSaving]);
 
   const currentModel =
-    aiModels.find((m) => m.id === setupData?.aiConfig.modelId) || aiModels[0];
+    modelProfiles.find((m) => m.id === "primary");
 
   const handleUpdateField = <K extends keyof ProjectSetupData>(
     field: K,
@@ -292,7 +271,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
         setCodeFile(null);
         setIsUploaded(Boolean(specFile || setupData.specFile?.fileName));
-        alert("프로젝트 저장 및 파일 업로드가 완료되었습니다. 이제 AI API 연결을 확인해주세요.");
+        alert("프로젝트 저장 및 파일 업로드가 완료되었습니다. 서버 모델 연결을 확인할 수 있습니다.");
       } else {
         alert(`프로젝트 저장 실패: ${response.error || "알 수 없는 오류"}`);
       }
@@ -308,7 +287,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
   const handleVerifyApiKey = async () => {
     if (!projectId) {
-      alert("먼저 프로젝트를 저장하고 파일을 업로드해주세요.");
+      alert("먼저 프로젝트 설정을 저장해주세요.");
       return;
     }
 
@@ -316,16 +295,10 @@ export const SetupView: React.FC<SetupViewProps> = ({
     setConnectionErrorMsg("");
 
     try {
-      const selectedProfile = modelProfiles.find((p) => p.id === setupData?.aiConfig.modelId);
       let currentConfigVersion = setupData?.aiConfig.configVersion || 0;
-      let credentialRef: string | undefined;
+      handleUpdateAiConfig("isConnected", false);
 
-      if (selectedProfile?.credential_required && setupData?.aiConfig.apiKey) {
-        const credRes = await saveProjectCredentials(projectId, selectedProfile.id, setupData.aiConfig.apiKey);
-        credentialRef = credRes.credential_ref;
-      }
-
-      const llmRes = await updateProjectLLMConfig(projectId, setupData!.aiConfig.modelId, currentConfigVersion, credentialRef);
+      const llmRes = await updateProjectLLMConfig(projectId, "primary", currentConfigVersion);
       currentConfigVersion = llmRes.config_version || (currentConfigVersion + 1);
       handleUpdateAiConfig("configVersion", currentConfigVersion);
 
@@ -334,7 +307,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       if (verifyRes.status === "connected") {
         setConnectionStatus("SUCCESS");
         handleUpdateAiConfig("isConnected", true);
-        alert("AI API 연결이 성공적으로 확인되었습니다.");
+        alert("서버에 설정된 모델의 실제 호출과 JSON 응답을 확인했습니다.");
       } else {
         throw new Error("연결에 실패했습니다.");
       }
@@ -591,110 +564,25 @@ export const SetupView: React.FC<SetupViewProps> = ({
         <div className="lg:col-span-4 flex flex-col justify-between gap-5 h-full">
           <Card
             title="AI 모델 연결"
-            description="분석에 사용할 모델의 연결 상태를 확인합니다."
+            description="서버에 등록된 키와 모델로 연결을 테스트합니다."
             className="space-y-4"
           >
-            <div className="space-y-1.5 relative">
-              <label className={VIEW_HEADER.fieldLabel}>분석 모델</label>
-              <button
-                type="button"
-                onClick={() => setIsDropdownOpen(!isDropdownOpen)}
-                className={`w-full px-3 py-2.5 bg-white border rounded-xl flex items-center justify-between text-xs transition-all ${
-                  isDropdownOpen
-                    ? "border-blue-500 ring-2 ring-blue-100"
-                    : "border-slate-200 hover:border-slate-300"
-                }`}
-              >
-                <span className="font-medium text-slate-800">
-                  {currentModel?.name || "모델을 선택하세요"}
-                </span>
-                <div className="flex items-center space-x-2">
-                  <span className="text-[11px] text-slate-400">
-                    {currentModel?.provider}
-                  </span>
-                  <svg
-                    className={`w-3.5 h-3.5 text-slate-400 transition-transform ${
-                      isDropdownOpen ? "rotate-180" : ""
-                    }`}
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 9l-7 7-7-7"
-                    />
-                  </svg>
-                </div>
-              </button>
-
-              {isDropdownOpen && (
-                <div className="absolute top-full left-0 right-0 mt-1.5 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-1.5 space-y-1">
-                  <div className="px-2 py-1 text-[11px] text-slate-400 font-medium">
-                    분석 모델 선택 · 한 번에 1개
-                  </div>
-                  {aiModels.map((model: AIModelOption & { enabled?: boolean }) => {
-                    const isSelected =
-                      (setupData.aiConfig.modelId || currentModel?.id) ===
-                      model.id;
-                    return (
-                      <button
-                        key={model.id}
-                        type="button"
-                        disabled={!model.enabled}
-                        onClick={() => {
-                          handleUpdateAiConfig("modelId", model.id);
-                          setIsDropdownOpen(false);
-                        }}
-                        className={`w-full px-3 py-2 text-left rounded-lg text-xs flex items-center justify-between transition-colors ${
-                          !model.enabled
-                            ? "opacity-50 cursor-not-allowed bg-slate-50 text-slate-400"
-                            : isSelected
-                              ? "bg-blue-50 text-blue-600 font-semibold"
-                              : "hover:bg-slate-50 text-slate-700"
-                        }`}
-                      >
-                        <div>
-                          <div className="font-medium">
-                            {model.name} {model.enabled === false && "(미지원)"}
-                          </div>
-                          <div className="text-[10px] text-slate-400 font-normal">
-                            {model.provider}
-                          </div>
-                        </div>
-                        {isSelected && (
-                          <svg
-                            className="w-4 h-4 text-blue-600"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2.5}
-                              d="M5 13l4 4L19 7"
-                            />
-                          </svg>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-1.5">
-              <label className={VIEW_HEADER.fieldLabel}>API 키</label>
-              <Input
-                type="password"
-                value={setupData.aiConfig.apiKey || ""}
-                onChange={(e) => handleUpdateAiConfig("apiKey", e.target.value)}
-                placeholder="제공업체 API 키 입력"
-                className="tracking-wider"
-              />
+            <div className="space-y-3 rounded-lg bg-slate-50 border border-slate-200 p-3">
+              <div>
+                <div className={VIEW_HEADER.fieldLabel}>연결 방식</div>
+                <p className="text-xs text-slate-700 mt-1">백엔드 서버 설정 사용</p>
+              </div>
+              <div>
+                <div className={VIEW_HEADER.fieldLabel}>제공업체</div>
+                <p className="text-xs text-slate-700 mt-1">{currentModel?.provider || "설정 확인 중"}</p>
+              </div>
+              <div>
+                <div className={VIEW_HEADER.fieldLabel}>분석 모델</div>
+                <p className="text-xs text-slate-700 mt-1 break-all">{currentModel?.model || "설정 확인 중"}</p>
+              </div>
+              <p className="text-xs text-slate-500">
+                {currentModel?.enabled ? "서버에 등록된 API 키를 사용합니다. 화면에서 키를 입력하지 않아도 됩니다." : "서버의 제공업체·모델·API 키 설정을 확인해주세요."}
+              </p>
             </div>
 
             <div className="space-y-2 pt-1">
@@ -725,7 +613,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
                     variant="secondary"
                     size="md"
                     onClick={handleVerifyApiKey}
-                    disabled={connectionStatus === "CHECKING" || !isUploaded || !modelProfiles.some(p => p.id === setupData.aiConfig.modelId && p.enabled)}
+                    disabled={connectionStatus === "CHECKING" || !projectId || !currentModel?.enabled}
                   >
                     {connectionStatus === "CHECKING"
                       ? "확인 중..."
@@ -734,7 +622,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 </div>
               </div>
               
-              {connectionStatus === "FAILED" && connectionErrorMsg && (
+              {connectionErrorMsg && (
                 <div className="text-[11px] text-rose-600 bg-rose-50 p-2 rounded-lg mt-2 break-keep">
                   <span className="font-semibold block mb-0.5">연결 에러</span>
                   {connectionErrorMsg}
@@ -743,8 +631,9 @@ export const SetupView: React.FC<SetupViewProps> = ({
             </div>
 
             <p className="text-[11px] text-slate-400 leading-relaxed pt-2 border-t border-slate-100">
-              먼저 파일을 저장한 뒤, API 키로 연결을 확인하세요.
+              프로젝트를 저장한 뒤 연결을 확인하세요. 짧은 테스트 요청 1회로 호출 비용이 발생할 수 있습니다. 문서와 코드는 보내지 않습니다.
             </p>
+            <p className="text-xs text-amber-700">연결 성공은 모델 호출 테스트 결과입니다. 요구사항 자동 추출·코드 자동 판정·테스트 자동 생성의 웹 실행 연결은 아직 준비 중입니다.</p>
           </Card>
 
           <Card

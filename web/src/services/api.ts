@@ -1,3 +1,4 @@
+import { projectStackLabel } from "../projectStacks";
 import type { TestSpecification } from "../types/test";
 import type {
   AIModelOption,
@@ -37,13 +38,13 @@ export const handleResponse = async (res: Response) => {
 
 export const fetchRecentProjects = async (): Promise<RecentProject[]> => {
   try {
-    const data = { items: await fetchAll<{ id: string; name: string; created_at: string }>("/projects") };
+    const data = { items: await fetchAll<{ id: string; name: string; created_at: string; tech_stack?: string }>("/projects") };
     return data.items.map(
-      (p: { id: string; name: string; created_at: string }) => ({
+      (p: { id: string; name: string; created_at: string; tech_stack?: string }) => ({
         id: p.id,
         name: p.name,
         updatedAt: p.created_at.split("T")[0],
-        techStack: "스택 미지정",
+        techStack: projectStackLabel(p.tech_stack),
         status: "대기 중",
       }),
     );
@@ -80,8 +81,7 @@ export const fetchProjectSetup = async (
     return {
       projectName: data.name,
       version: data.version,
-      techStack: "",
-      codeScope: "",
+      techStack: data.tech_stack || "auto",
     } as unknown as ProjectSetupData;
   } catch (error) {
     console.error("프로젝트 정보 조회 실패:", error);
@@ -90,7 +90,7 @@ export const fetchProjectSetup = async (
 };
 
 export const saveProjectSetup = async (
-  data: { projectName?: string },
+  data: { projectName?: string; techStack?: string },
   projectId?: string,
   baseVersion: number = 1,
 ): Promise<{
@@ -107,6 +107,7 @@ export const saveProjectSetup = async (
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: data.projectName || "새 프로젝트",
+          tech_stack: data.techStack || "auto",
           base_version: baseVersion,
         }),
       });
@@ -116,6 +117,7 @@ export const saveProjectSetup = async (
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: data.projectName || "새 프로젝트",
+          tech_stack: data.techStack || "auto",
         }),
       });
     }

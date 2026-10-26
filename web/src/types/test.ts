@@ -31,6 +31,8 @@ export interface TestCase {
   requirement_links: RequirementLink[];
   revision: number;
   origin: string;
+  assumptions?: string[];
+  warnings?: {code: string; message: string}[];
   prediction?: {
     status: string;
     reason: string;
@@ -65,4 +67,8 @@ export interface TestSpecification {
   revision: number;
   status: string;
   test_case_ids: string[];
+  origin?: string;
+  generation_status?: string;
+  warnings?: {code: string; message: string}[];
+  uncovered_conditions?: {requirement_id: string; condition_id: string; reason: string}[];
 }

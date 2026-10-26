@@ -4,10 +4,13 @@ import type { TestCase, TestExecution, TestSpecification, TestStep, StepResult }
 import { useProject } from '../contexts/ProjectContext';
 import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } from '../services/api';
 import { Button, Card, PageHeader } from '../components/common';
+import { TestSpecLoadingModal } from '../components/test/TestSpecLoadingModal';
 
 type Spec = TestSpecification & { requirement_versions: {requirement_id:string;revision:number}[] };
 type Req = RequirementItem & {revision:number;subtopic_id:string};
 interface Run {id:string;created_at:string;status:string;requirement_versions:{requirement_id:string;revision:number}[]}
+interface GenerationJob {id:string;operation:string;status:string;progress?:{completed:number;total:number};result_ref?:{id:string};result?:{test_case_count:number;step_count:number};error?:{message:string};missing_features:{message:string}[]}
+interface GenerationPlan {model_config_version:number;requirement_count:number;subtopic_count:number;max_model_calls:number;provider:string;model:string;snapshot_id:string;verification_run_id:string;requirement_ids:string[];runDate:string}
 interface Draft {title:string;preconditions:string;steps:TestStep[];results:StepResult[];procedureChanged:boolean;executionChanged:boolean}
 const inputClass='w-full border border-slate-200 rounded p-2 text-sm bg-white';
 const predictionLabels:Record<string,string>={normal_expected:'정상 예상',failure_expected:'실패 예상',needs_review:'확인 필요',unknown:'미예측'};
@@ -32,6 +35,11 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
   const [editing,setEditing]=useState(false);
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
+  const [generationJobId,setGenerationJobId]=useState('');
+  const [generationProgress,setGenerationProgress]=useState<{completed:number;total:number;stage?:string}|null>(null);
+  const [cancellingGeneration,setCancellingGeneration]=useState(false);
+  const [generationPlan,setGenerationPlan]=useState<GenerationPlan|null>(null);
+  const [generationError,setGenerationError]=useState('');
   const [adding,setAdding]=useState(false);
   const [newTitle,setNewTitle]=useState('');
   const [newReqId,setNewReqId]=useState('');
@@ -46,12 +54,14 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
 
   const loadLists=useCallback(async()=>{
     if(!projectId)return;
-    const [specItems,runItems]=await Promise.all([fetchAll<Spec>(`/projects/${projectId}/test-specifications`),fetchAll<Run>(`/projects/${projectId}/verification-runs`)]);
+    const [specItems,runItems,jobs]=await Promise.all([fetchAll<Spec>(`/projects/${projectId}/test-specifications`),fetchAll<Run>(`/projects/${projectId}/verification-runs`),fetchAll<GenerationJob>(`/projects/${projectId}/jobs`)]);
     specItems.reverse();runItems.reverse();setSpecs(specItems);setRuns(runItems);setRunId(prev=>prev||runItems[0]?.id||'');setSpecId(prev=>prev||specItems[0]?.id||'');
+    const pendingJob=jobs.find(j=>j.operation==='generate_test_specification'&&['queued','running'].includes(j.status));
+    if(pendingJob)setGenerationJobId(pendingJob.id);
   },[projectId]);
-  const loadSpec=useCallback(async()=>{
-    if(!projectId||!specId)return;
-    const [current,items,stats]=await Promise.all([api<Spec>(`/projects/${projectId}/test-specifications/${specId}`),fetchAll<TestCase>(`/projects/${projectId}/test-cases?test_specification_id=${specId}`),api<{scenario_summary:Record<string,number>;step_summary:Record<string,number>}>(`/projects/${projectId}/test-specifications/${specId}/execution-summary`)]);
+  const loadSpecById=useCallback(async(targetId:string)=>{
+    if(!projectId||!targetId)return;
+    const [current,items,stats]=await Promise.all([api<Spec>(`/projects/${projectId}/test-specifications/${targetId}`),fetchAll<TestCase>(`/projects/${projectId}/test-cases?test_specification_id=${targetId}`),api<{scenario_summary:Record<string,number>;step_summary:Record<string,number>}>(`/projects/${projectId}/test-specifications/${targetId}/execution-summary`)]);
     const [reqs,records]=await Promise.all([
       Promise.all(current.requirement_versions.map(r=>api<Req>(`/projects/${projectId}/requirements/${r.requirement_id}?revision=${r.revision}`))),
       Promise.all(items.map(c=>fetchAll<TestExecution>(`/projects/${projectId}/test-cases/${c.id}/executions`))),
@@ -59,14 +69,61 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
     const latest:Record<string,TestExecution>={};
     items.forEach((c,i)=>{const e=records[i].filter(e=>e.test_case_revision===c.revision).sort((a,b)=>b.attempt_no-a.attempt_no)[0];if(e)latest[c.id]=e;});
     setSpecs(prev=>prev.map(s=>s.id===current.id?current:s));setCases(items);setRequirements(reqs);setExecutions(latest);setSummary(stats);setActiveId(prev=>items.some(c=>c.id===prev)?prev:items[0]?.id||'');setNewReqId(prev=>reqs.some(r=>r.id===prev)?prev:reqs[0]?.id||'');
-  },[projectId,specId]);
+  },[projectId]);
+  const loadSpec=useCallback(()=>loadSpecById(specId),[loadSpecById,specId]);
   useEffect(()=>{void Promise.resolve().then(loadLists).catch(e=>setMessage(errorMessage(e)));},[loadLists]);
   useEffect(()=>{void Promise.resolve().then(loadSpec).catch(e=>setMessage(errorMessage(e)));},[loadSpec]);
+  const cancelGenerationJob = async () => {
+    if (!projectId || !generationJobId || cancellingGeneration) return;
+    if (!window.confirm('진행 중인 테스트 사양서 자동 생성을 중단하시겠습니까?')) return;
+    setCancellingGeneration(true);
+    try {
+      await api(`${base}/jobs/${generationJobId}/cancel`, jsonRequest('POST', {}));
+      setMessage('테스트 사양서 생성을 사용자가 중단했습니다.');
+      setGenerationJobId('');
+      setGenerationProgress(null);
+      await loadLists();
+    } catch (e) {
+      setMessage(`생성 중단 실패: ${errorMessage(e)}`);
+    } finally {
+      setCancellingGeneration(false);
+      setBusy(false);
+    }
+  };
+
   useEffect(()=>{
-    const warn=(e:BeforeUnloadEvent)=>{if(changed||adding)e.preventDefault();};window.addEventListener('beforeunload',warn);
+    if(!generationJobId||!projectId)return;
+    const controller=new AbortController();let active=true;
+    void Promise.resolve().then(async()=>{
+      setBusy(true);
+      try{
+        while(active){
+          const job=await api<GenerationJob>(`/projects/${projectId}/jobs/${generationJobId}`,{signal:controller.signal});
+          if(!active)return;
+          if(job.progress) setGenerationProgress(job.progress);
+          setMessage(`AI 테스트케이스 생성 ${job.status==='queued'?'대기 중':'진행 중'} · 소주제 ${job.progress?.completed||0}/${job.progress?.total||0}`);
+          if(['completed','failed','blocked','cancelled'].includes(job.status)){
+            await loadLists();if(!active)return;
+            if(job.status==='completed'&&job.result_ref){
+              setCases([]);setSummary(null);setRequirements([]);setExecutions({});setActiveId('');setFilter('');setSpecId(job.result_ref.id);await loadSpecById(job.result_ref.id);if(!active)return;
+              setMessage(`테스트케이스 ${job.result?.test_case_count||0}개 · 단계 ${job.result?.step_count||0}개를 새 사양서 초안에 저장했습니다. 원문과 비교해 검토하세요. 실제 수행 결과는 미실행입니다.`);
+            }else setMessage(job.error?.message||job.missing_features?.map(f=>f.message).join(' / ')||`생성 상태: ${job.status}`);
+            break;
+          }
+          await new Promise(resolve=>setTimeout(resolve,1000));
+        }
+      }catch(e){if(active)setMessage(`${errorMessage(e)} · 화면에 다시 들어오면 생성 진행을 조회합니다. 자동으로 재생성하지 않습니다.`);}
+      finally{if(active){setBusy(false);setGenerationJobId('');setGenerationProgress(null);}}
+    });
+    return()=>{active=false;controller.abort();};
+  },[generationJobId,projectId,loadLists,loadSpecById]);
+  const hasNewDraft = adding && (!!newTitle.trim() || newSteps.some(s => !!s.action.trim() || !!s.expected.trim() || !!s.input.trim()));
+  const isDirty = changed || hasNewDraft;
+  useEffect(()=>{
+    const warn=(e:BeforeUnloadEvent)=>{if(isDirty)e.preventDefault();};window.addEventListener('beforeunload',warn);
     return()=>window.removeEventListener('beforeunload',warn);
-  },[changed,adding]);
-  useEffect(()=>{setUnsavedChanges(changed||adding);return()=>setUnsavedChanges(false);},[changed,adding,setUnsavedChanges]);
+  },[isDirty]);
+  useEffect(()=>{setUnsavedChanges(isDirty);return()=>setUnsavedChanges(false);},[isDirty,setUnsavedChanges]);
   const draftFor=(c:TestCase):Draft=>drafts[c.id]||{title:c.title,preconditions:c.preconditions,steps:structuredClone(c.steps),results:c.steps.map(s=>executions[c.id]?.step_results.find(r=>r.step_key===s.step_key)||resultFor(s.step_key)),procedureChanged:false,executionChanged:false};
   const changeProcedure=(id:string,change:Partial<Draft>)=>{
     const c=cases.find(c=>c.id===id)!;const old=draftFor(c);const steps=change.steps||old.steps;
@@ -91,7 +148,71 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
       pending.current=null;setDrafts({});setEditing(false);setUnsavedChanges(false);await loadSpec();setMessage('저장했습니다. 서버의 절차·수행 결과·집계를 다시 조회했습니다.');return true;
     }catch(e){setMessage(`${errorMessage(e)} · 편집 내용을 유지했습니다. 충돌 시 최신 개정을 확인한 뒤 다시 편집하세요.`);return false;}finally{setBusy(false);setNavigationLocked(false);}
   },[spec,drafts,cases,executions,base,loadSpec,setUnsavedChanges,setNavigationLocked]);
-  useEffect(()=>{saveBeforeLeaveRef.current=adding?null:save;return()=>{saveBeforeLeaveRef.current=null;};},[saveBeforeLeaveRef,save,adding]);
+  const resetNewCaseForm = useCallback(() => {
+    setNewTitle('');
+    setSection('general');
+    setType('positive');
+    setNewSteps([{ action: '', expected: '', input: '' }]);
+    setAdding(false);
+  }, []);
+
+  const saveNewCase = useCallback(async (): Promise<boolean> => {
+    const r = requirements.find(r => r.id === newReqId);
+    if (!r || !spec) return false;
+    if (!newTitle.trim()) {
+      alert('시험 이름을 입력하세요.');
+      return false;
+    }
+    const emptyStep = newSteps.some(s => !s.action.trim() || !s.expected.trim());
+    if (emptyStep) {
+      alert('시험 절차와 기대 결과를 모두 입력하세요.');
+      return false;
+    }
+    setBusy(true);
+    try {
+      const links = [{ requirement_id: r.id, requirement_revision: r.revision, condition_ids: r.conditions.map(c => c.id!) }];
+      await api(`${base}/test-cases`, jsonRequest('POST', {
+        test_specification_id: spec.id,
+        export_section_key: section,
+        subtopic_id: r.subtopic_id,
+        title: newTitle.trim(),
+        type,
+        preconditions: '',
+        requirement_links: links,
+        steps: newSteps.map((s, i) => ({
+          step_key: crypto.randomUUID(),
+          order: i + 1,
+          action: s.action.trim(),
+          expected: s.expected.trim(),
+          test_data: { account: null, input: s.input, notes: '' },
+          requirement_links: links,
+        })),
+      }));
+      resetNewCaseForm();
+      await loadSpec();
+      setMessage('수동 시험을 추가했습니다. 실제 수행은 아직 미실행입니다.');
+      return true;
+    } catch (e) {
+      setMessage(errorMessage(e));
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }, [requirements, newReqId, spec, newTitle, newSteps, section, type, base, resetNewCaseForm, loadSpec]);
+
+  useEffect(() => {
+    if (adding && hasNewDraft) {
+      saveBeforeLeaveRef.current = saveNewCase;
+    } else if (changed) {
+      saveBeforeLeaveRef.current = save;
+    } else {
+      saveBeforeLeaveRef.current = null;
+    }
+    return () => {
+      saveBeforeLeaveRef.current = null;
+    };
+  }, [saveBeforeLeaveRef, adding, hasNewDraft, changed, saveNewCase, save]);
+
   const createSpec=async()=>{
     const run=runs.find(r=>r.id===runId);if(!run)return;setBusy(true);
     try{const created=await api<Spec>(`${base}/test-specifications`,jsonRequest('POST',{verification_run_id:run.id,requirement_ids:run.requirement_versions.map(r=>r.requirement_id)}));await loadLists();setSpecId(created.id);setMessage('빈 수동 사양서를 만들었습니다. 시험을 직접 추가하세요.');}
@@ -99,15 +220,26 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
   };
   const generate=async()=>{
     const run=runs.find(r=>r.id===runId);if(!run)return;setBusy(true);
-    try{const job=await api<{id:string}>(`${base}/test-specifications/generate`,jsonRequest('POST',{verification_run_id:run.id,requirement_ids:run.requirement_versions.map(r=>r.requirement_id)}));const done=await pollJobStatus(projectId!,job.id) as {status:string;missing_features:{message:string}[]};await loadLists();setMessage(done.status==='blocked'?done.missing_features.map(f=>f.message).join(' / '):`생성 상태: ${done.status}`);}
+    try{
+      const body={verification_run_id:run.id,requirement_ids:run.requirement_versions.map(r=>r.requirement_id)};
+      const prepared=await api<Omit<GenerationPlan,'requirement_ids'|'runDate'>>(`${base}/test-specifications/generate/prepare`,jsonRequest('POST',body));
+      setGenerationError('');setGenerationPlan({...prepared,requirement_ids:body.requirement_ids,runDate:run.created_at});
+    }
     catch(e){setMessage(errorMessage(e));}finally{setBusy(false);}
   };
-  const addCase=async(event:React.FormEvent)=>{
-    event.preventDefault();const r=requirements.find(r=>r.id===newReqId);if(!r||!spec)return;setBusy(true);
-    try{const links=[{requirement_id:r.id,requirement_revision:r.revision,condition_ids:r.conditions.map(c=>c.id!)}];
-      await api(`${base}/test-cases`,jsonRequest('POST',{test_specification_id:spec.id,export_section_key:section,subtopic_id:r.subtopic_id,title:newTitle,type,preconditions:'',requirement_links:links,steps:newSteps.map((s,i)=>({step_key:crypto.randomUUID(),order:i+1,action:s.action,expected:s.expected,test_data:{account:null,input:s.input,notes:''},requirement_links:links}))}));
-      setAdding(false);setNewTitle('');setNewSteps([{action:'',expected:'',input:''}]);await loadSpec();setMessage('수동 시험을 추가했습니다. 실제 수행은 아직 미실행입니다.');
-    }catch(e){setMessage(errorMessage(e));}finally{setBusy(false);}
+  const startGeneration=async()=>{
+    if(!generationPlan)return;setBusy(true);
+    try{
+      const job=await api<GenerationJob>(`${base}/test-specifications/generate`,jsonRequest('POST',{verification_run_id:generationPlan.verification_run_id,requirement_ids:generationPlan.requirement_ids,model_config_version:generationPlan.model_config_version}));
+      setGenerationPlan(null);
+      if(['queued','running'].includes(job.status))setGenerationJobId(job.id);
+      else setMessage(job.error?.message||job.missing_features?.map(f=>f.message).join(' / ')||`생성 상태: ${job.status}`);
+    }
+    catch(e){setGenerationError(errorMessage(e));setMessage(errorMessage(e));}finally{setBusy(false);}
+  };
+  const addCase = async (event: React.FormEvent) => {
+    event.preventDefault();
+    await saveNewCase();
   };
   const exportExcel=async()=>{
     if(!spec)return;setBusy(true);
@@ -118,30 +250,46 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
   };
   if(!projectId)return <Button onClick={()=>onNavigateStep('SETUP')}>프로젝트를 선택하세요</Button>;
   return <div className="max-w-7xl mx-auto space-y-5">
+    <TestSpecLoadingModal
+      isOpen={!!generationJobId}
+      progress={generationProgress}
+      statusText={generationProgress ? `소주제 분석 및 테스트케이스 생성 중 (${generationProgress.completed}/${generationProgress.total})` : 'AI 테스트케이스 생성 준비 중...'}
+      onCancel={cancelGenerationJob}
+      cancelling={cancellingGeneration}
+    />
     <PageHeader stepTag="04 / TEST SPECIFICATION" title="테스트 사양서" description="시험 절차와 실제 수행을 구분해 편집·저장하고 단계별 Excel을 출력합니다."/>
+    {generationPlan&&<div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4"><div role="dialog" aria-modal="true" aria-label="AI 테스트케이스 생성 확인" className="w-full max-w-lg bg-white p-6 rounded-xl space-y-4 shadow-xl"><h2 className="text-lg font-bold">AI 테스트케이스 생성 확인</h2><p className="text-sm">선택한 검증 실행: {generationPlan.runDate}<br/>코드 스냅샷: {generationPlan.snapshot_id.slice(0,8)}</p><p className="text-sm">검토 확정 요구사항 {generationPlan.requirement_count}개 · 소주제 {generationPlan.subtopic_count}개<br/>서버 모델: {generationPlan.provider} / {generationPlan.model}<br/>최대 모델 호출 {generationPlan.max_model_calls}회 · 호출 비용이 발생할 수 있습니다.</p><p className="text-sm text-slate-600">명세·조건을 모델에 보내 테스트 절차와 예상 결과를 작성합니다. 기존 사양서는 유지하고 새 초안을 저장합니다. 실제 수행 O/X는 생성하지 않습니다.</p>{generationError&&<p role="alert" className="text-sm text-red-700">{generationError} 생성 취소 후 범위를 다시 준비하세요.</p>}<div className="flex gap-2"><Button disabled={busy} onClick={startGeneration}>확인한 범위로 생성 시작</Button><Button autoFocus variant="secondary" disabled={busy} onClick={()=>setGenerationPlan(null)}>생성 취소</Button></div></div></div>}
     {message&&<p role="status" className="bg-blue-50 p-3 rounded text-sm">{message}</p>}
-    <div className="flex flex-wrap gap-2"><select aria-label="사양서 생성 기준 실행" className={inputClass+' max-w-sm'} value={runId} disabled={editing||adding||busy} onChange={e=>setRunId(e.target.value)}>{runs.map(r=><option key={r.id} value={r.id}>{r.created_at} · {r.status}</option>)}</select><Button disabled={!runId||busy||editing||adding} onClick={createSpec}>수동 사양서 만들기</Button><Button variant="secondary" disabled={!runId||busy||editing||adding} onClick={generate}>AI 시험 생성</Button></div>
+    <div className="flex flex-wrap gap-2"><select aria-label="사양서 생성 기준 실행" className={inputClass+' max-w-sm'} value={runId} disabled={editing||adding||busy||!!generationJobId} onChange={e=>{setRunId(e.target.value);setMessage('');}}>{runs.map(r=><option key={r.id} value={r.id}>{r.created_at} · {r.status}</option>)}</select><Button disabled={!runId||busy||editing||adding||!!generationJobId} onClick={createSpec}>수동 사양서 만들기</Button><Button variant="secondary" disabled={runs.find(r=>r.id===runId)?.status!=='completed'||busy||editing||adding||!!generationJobId} onClick={generate}>AI 테스트케이스 생성</Button></div>
+    {runs.length>0&&runs.find(r=>r.id===runId)?.status!=='completed'&&<p className="text-sm text-amber-700">AI 생성에는 코드 검증이 완료된 실행이 필요합니다. 수동 사양서는 현재 실행에서도 만들 수 있습니다.</p>}
     {!runs.length&&<p>먼저 요구사항을 검토 확정하고 검증을 접수하세요. 모델 미연결 실행에서도 수동 사양서를 작성할 수 있습니다.</p>}
     <div className="flex flex-wrap gap-2"><select aria-label="테스트 사양서 선택" value={specId} className={inputClass+' max-w-sm'} disabled={editing||adding||busy} onChange={e=>setSpecId(e.target.value)}>{specs.map(s=><option key={s.id} value={s.id}>{s.id.slice(0,8)} · 개정 {s.revision} · {s.status}</option>)}</select><Button disabled={!spec||busy||editing||adding} onClick={()=>setAdding(true)}>시험 수동 추가</Button><Button disabled={!spec||busy||editing||adding} onClick={exportExcel}>테스트 Excel 출력</Button></div>
     {summary&&<p className="text-sm">시나리오 {summary.scenario_summary.total}개 · 단계 {summary.step_summary.total}개 · 통과 {summary.step_summary.passed} / 실패 {summary.step_summary.failed} / 보류 {summary.step_summary.on_hold} / 미실행 {summary.step_summary.not_run}</p>}
+    {spec?.origin==='generated'&&spec.generation_status==='completed'&&<p className="text-sm text-amber-800">AI 생성 초안입니다. 예상 결과·입력값·누락 조건을 원문과 비교한 뒤 사용하세요. 코드 예측과 실제 수행 결과는 구분됩니다.</p>}
+    {spec?.origin==='generated'&&spec.generation_status==='failed'&&<p className="text-sm text-red-700">이 사양서의 AI 생성은 실패했습니다. 기존 시험 기록은 유지됩니다. 다시 생성하려면 위의 AI 테스트케이스 생성을 선택하세요.</p>}
+    {!!(spec?.warnings?.length||spec?.uncovered_conditions?.length)&&<details className="border rounded p-3 text-sm text-amber-800"><summary>생성 경고 {spec?.warnings?.length||0}건 · 미포함 조건 {spec?.uncovered_conditions?.length||0}개</summary>{spec?.warnings?.map((w,i)=><p key={`w-${i}`}>{w.message}</p>)}{spec?.uncovered_conditions?.map((u,i)=><p key={`u-${i}`}>{requirements.find(r=>r.id===u.requirement_id)?.title}: {u.reason}</p>)}</details>}
     {adding&&<Card title="시험 수동 추가"><form className="space-y-3" onSubmit={addCase}>
       <label>시험 이름<input aria-label="시험 이름" required className={inputClass} value={newTitle} onChange={e=>setNewTitle(e.target.value)}/></label>
       <select aria-label="시험 연결 요구사항" className={inputClass} value={newReqId} onChange={e=>setNewReqId(e.target.value)}>{requirements.map(r=><option key={r.id} value={r.id}>{r.title} · 개정 {r.revision}</option>)}</select>
       <p className="text-xs">선택한 요구사항의 수락 조건을 이 시험의 각 단계에 연결합니다. 절차·기대 결과는 직접 작성하세요.</p>
       <div className="flex gap-3"><select aria-label="시험 출력 영역" className={inputClass} value={section} onChange={e=>setSection(e.target.value)}>{Object.entries(sectionLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select><select aria-label="시험 유형" className={inputClass} value={type} onChange={e=>setType(e.target.value)}><option value="positive">정상</option><option value="negative">오류</option><option value="boundary">경계</option></select></div>
       {newSteps.map((s,i)=><fieldset key={i} className="border rounded p-3 space-y-2"><legend>단계 {i+1}</legend>{(['action','expected','input'] as const).map(k=><label key={k} className="block">{k==='action'?'시험 절차':k==='expected'?'기대 결과':'입력값'}<input aria-label={`새 단계 ${i+1} ${k}`} required={k!=='input'} className={inputClass} value={s[k]} onChange={e=>setNewSteps(prev=>prev.map((x,n)=>n===i?{...x,[k]:e.target.value}:x))}/></label>)}</fieldset>)}
-      <div className="flex gap-2"><Button type="button" variant="secondary" onClick={()=>setNewSteps(prev=>[...prev,{action:'',expected:'',input:''}])}>시험 단계 추가</Button><Button type="submit" disabled={busy}>시험 추가 저장</Button><Button type="button" variant="secondary" disabled={busy} onClick={()=>setAdding(false)}>추가 취소</Button></div>
+      <div className="flex gap-2"><Button type="button" variant="secondary" onClick={()=>setNewSteps(prev=>[...prev,{action:'',expected:'',input:''}])}>시험 단계 추가</Button><Button type="submit" disabled={busy}>시험 추가 저장</Button><Button type="button" variant="secondary" disabled={busy} onClick={resetNewCaseForm}>추가 취소</Button></div>
     </form></Card>}
     <div className="grid lg:grid-cols-[260px_1fr] gap-5">
       <Card title="시험 목록"><select aria-label="시험 요구사항 필터" className={inputClass} value={filter} disabled={editing} onChange={e=>setFilter(e.target.value)}><option value="">전체 요구사항</option>{requirements.map(r=><option key={r.id} value={r.id}>{r.title}</option>)}</select><div className="mt-3 space-y-2">{visible.map(c=><button key={c.id} disabled={busy} className={`w-full text-left border rounded p-3 text-sm ${active?.id===c.id?'bg-blue-50 border-blue-400':''}`} onClick={()=>setActiveId(c.id)}>{c.test_no}<strong className="block">{c.title}</strong><small>{statusLabels[(executions[c.id]?.status||'not_run') as keyof typeof statusLabels]} · 개정 {c.revision}{drafts[c.id]?.procedureChanged||drafts[c.id]?.executionChanged?' · 미저장':''}</small></button>)}</div></Card>
-      <Card title={active?.title||'등록된 시험이 없습니다'} extra={active&&!adding?(editing?<div className="flex gap-2"><Button disabled={busy||!changed} onClick={save}>저장</Button><Button variant="secondary" disabled={busy} onClick={()=>{setDrafts({});setEditing(false);setUnsavedChanges(false);void loadSpec().catch(e=>setMessage(errorMessage(e)));}}>취소</Button></div>:<Button aria-label="시험 표 편집" disabled={busy} onClick={()=>setEditing(true)}>✎ 편집</Button>):undefined}>
+      <Card title={active?.title||'등록된 시험이 없습니다'} extra={active&&!adding?(editing?<div className="flex gap-2"><Button disabled={busy||!changed} onClick={save}>저장</Button><Button variant="secondary" disabled={busy} onClick={()=>{setDrafts({});setEditing(false);setUnsavedChanges(false);void loadSpec().catch(e=>setMessage(errorMessage(e)));}}>취소</Button></div>:<Button aria-label="시험 표 편집" disabled={busy} onClick={()=>setEditing(true)}>시험 편집</Button>):undefined}>
         {active&&(()=>{const draft=draftFor(active);const steps=editing?draft.steps:active.steps;return <div className="space-y-4">
           <p className="text-sm">코드 예측: {predictionLabels[active.prediction?.status||'unknown']||'확인 필요'} · {active.prediction?.reason||'없음'}</p>
+          <p className="text-sm whitespace-pre-wrap">사전 조건: {active.preconditions||'없음'}</p>
+          {active.assumptions?.map((text,i)=><p className="text-sm text-amber-700" key={`a-${i}`}>확인할 가정: {text}</p>)}
+          {active.warnings?.map((w,i)=><p className="text-sm text-amber-700" key={`w-${i}`}>{w.message}</p>)}
           {draft.procedureChanged&&<p className="text-amber-700 text-sm">절차를 변경했습니다. 이전 수행 결과를 새 절차에 적용하지 않습니다.</p>}
           {editing&&<label>시험 제목<input aria-label="편집 시험 제목" className={inputClass} value={draft.title} onChange={e=>changeProcedure(active.id,{title:e.target.value})}/></label>}
           {steps.map((step,i)=>{const result=editing?draft.results.find(r=>r.step_key===step.step_key):executions[active.id]?.step_results.find(r=>r.step_key===step.step_key);return <fieldset key={step.step_key} className="border rounded p-4 space-y-3"><legend>단계 {i+1}</legend>
             <div className="grid md:grid-cols-2 gap-3">{(['action','expected'] as const).map(k=><label key={k}>{k==='action'?'시험 절차':'기대 결과'}{editing?<textarea aria-label={`단계 ${i+1} ${k}`} className={inputClass} value={step[k]} onChange={e=>changeProcedure(active.id,{steps:draft.steps.map((s,n)=>n===i?{...s,[k]:e.target.value}:s)})}/>:<p className="text-sm whitespace-pre-wrap select-text">{step[k]}</p>}</label>)}</div>
             <label className="block">입력값{editing?<input aria-label={`단계 ${i+1} 입력값`} className={inputClass} value={step.test_data.input} onChange={e=>changeProcedure(active.id,{steps:draft.steps.map((s,n)=>n===i?{...s,test_data:{...s.test_data,input:e.target.value}}:s)})}/>:<p className="text-sm">{step.test_data.input||'미지정'}</p>}</label>
+            <p className="text-xs text-slate-600">시험 계정/역할: {step.test_data.account||'미지정'} · 비고: {step.test_data.notes||'없음'}</p>
             {editing?<div className="grid md:grid-cols-3 gap-3"><label>수행 상태<select aria-label={`단계 ${i+1} 수행 상태`} className={inputClass} value={result?.status||'not_run'} onChange={e=>changeResult(active.id,step.step_key,'status',e.target.value)}>{Object.entries(statusLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><label>실제 결과<input aria-label={`단계 ${i+1} 실제 결과`} className={inputClass} value={result?.actual||''} onChange={e=>changeResult(active.id,step.step_key,'actual',e.target.value)}/></label><label>수행 메모 / 보류 사유<input aria-label={`단계 ${i+1} 수행 메모`} className={inputClass} value={result?.notes||''} onChange={e=>changeResult(active.id,step.step_key,'notes',e.target.value)}/></label></div>:<p className="text-sm">실제 수행: {statusLabels[result?.status||'not_run']} · {result?.actual} {result?.notes}</p>}
             <p className="text-xs text-slate-400">연결 조건 {step.requirement_links.reduce((n,r)=>n+r.condition_ids.length,0)}개 · 단계 키 {step.step_key}</p>
           </fieldset>;})}

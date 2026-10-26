@@ -4,6 +4,7 @@ import type { TestCase, TestExecution, TestSpecification, TestStep, StepResult }
 import { useProject } from '../contexts/ProjectContext';
 import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } from '../services/api';
 import { Button, Card, PageHeader } from '../components/common';
+import { TestSpecLoadingModal } from '../components/test/TestSpecLoadingModal';
 
 type Spec = TestSpecification & { requirement_versions: {requirement_id:string;revision:number}[] };
 type Req = RequirementItem & {revision:number;subtopic_id:string};
@@ -35,6 +36,8 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
   const [busy,setBusy]=useState(false);
   const [message,setMessage]=useState('');
   const [generationJobId,setGenerationJobId]=useState('');
+  const [generationProgress,setGenerationProgress]=useState<{completed:number;total:number;stage?:string}|null>(null);
+  const [cancellingGeneration,setCancellingGeneration]=useState(false);
   const [generationPlan,setGenerationPlan]=useState<GenerationPlan|null>(null);
   const [generationError,setGenerationError]=useState('');
   const [adding,setAdding]=useState(false);
@@ -70,6 +73,24 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
   const loadSpec=useCallback(()=>loadSpecById(specId),[loadSpecById,specId]);
   useEffect(()=>{void Promise.resolve().then(loadLists).catch(e=>setMessage(errorMessage(e)));},[loadLists]);
   useEffect(()=>{void Promise.resolve().then(loadSpec).catch(e=>setMessage(errorMessage(e)));},[loadSpec]);
+  const cancelGenerationJob = async () => {
+    if (!projectId || !generationJobId || cancellingGeneration) return;
+    if (!window.confirm('진행 중인 테스트 사양서 자동 생성을 중단하시겠습니까?')) return;
+    setCancellingGeneration(true);
+    try {
+      await api(`${base}/jobs/${generationJobId}/cancel`, jsonRequest('POST', {}));
+      setMessage('테스트 사양서 생성을 사용자가 중단했습니다.');
+      setGenerationJobId('');
+      setGenerationProgress(null);
+      await loadLists();
+    } catch (e) {
+      setMessage(`생성 중단 실패: ${errorMessage(e)}`);
+    } finally {
+      setCancellingGeneration(false);
+      setBusy(false);
+    }
+  };
+
   useEffect(()=>{
     if(!generationJobId||!projectId)return;
     const controller=new AbortController();let active=true;
@@ -79,6 +100,7 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
         while(active){
           const job=await api<GenerationJob>(`/projects/${projectId}/jobs/${generationJobId}`,{signal:controller.signal});
           if(!active)return;
+          if(job.progress) setGenerationProgress(job.progress);
           setMessage(`AI 테스트케이스 생성 ${job.status==='queued'?'대기 중':'진행 중'} · 소주제 ${job.progress?.completed||0}/${job.progress?.total||0}`);
           if(['completed','failed','blocked','cancelled'].includes(job.status)){
             await loadLists();if(!active)return;
@@ -91,7 +113,7 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
           await new Promise(resolve=>setTimeout(resolve,1000));
         }
       }catch(e){if(active)setMessage(`${errorMessage(e)} · 화면에 다시 들어오면 생성 진행을 조회합니다. 자동으로 재생성하지 않습니다.`);}
-      finally{if(active){setBusy(false);setGenerationJobId('');}}
+      finally{if(active){setBusy(false);setGenerationJobId('');setGenerationProgress(null);}}
     });
     return()=>{active=false;controller.abort();};
   },[generationJobId,projectId,loadLists,loadSpecById]);
@@ -228,6 +250,13 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
   };
   if(!projectId)return <Button onClick={()=>onNavigateStep('SETUP')}>프로젝트를 선택하세요</Button>;
   return <div className="max-w-7xl mx-auto space-y-5">
+    <TestSpecLoadingModal
+      isOpen={!!generationJobId}
+      progress={generationProgress}
+      statusText={generationProgress ? `소주제 분석 및 테스트케이스 생성 중 (${generationProgress.completed}/${generationProgress.total})` : 'AI 테스트케이스 생성 준비 중...'}
+      onCancel={cancelGenerationJob}
+      cancelling={cancellingGeneration}
+    />
     <PageHeader stepTag="04 / TEST SPECIFICATION" title="테스트 사양서" description="시험 절차와 실제 수행을 구분해 편집·저장하고 단계별 Excel을 출력합니다."/>
     {generationPlan&&<div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4"><div role="dialog" aria-modal="true" aria-label="AI 테스트케이스 생성 확인" className="w-full max-w-lg bg-white p-6 rounded-xl space-y-4 shadow-xl"><h2 className="text-lg font-bold">AI 테스트케이스 생성 확인</h2><p className="text-sm">선택한 검증 실행: {generationPlan.runDate}<br/>코드 스냅샷: {generationPlan.snapshot_id.slice(0,8)}</p><p className="text-sm">검토 확정 요구사항 {generationPlan.requirement_count}개 · 소주제 {generationPlan.subtopic_count}개<br/>서버 모델: {generationPlan.provider} / {generationPlan.model}<br/>최대 모델 호출 {generationPlan.max_model_calls}회 · 호출 비용이 발생할 수 있습니다.</p><p className="text-sm text-slate-600">명세·조건을 모델에 보내 테스트 절차와 예상 결과를 작성합니다. 기존 사양서는 유지하고 새 초안을 저장합니다. 실제 수행 O/X는 생성하지 않습니다.</p>{generationError&&<p role="alert" className="text-sm text-red-700">{generationError} 생성 취소 후 범위를 다시 준비하세요.</p>}<div className="flex gap-2"><Button disabled={busy} onClick={startGeneration}>확인한 범위로 생성 시작</Button><Button autoFocus variant="secondary" disabled={busy} onClick={()=>setGenerationPlan(null)}>생성 취소</Button></div></div></div>}
     {message&&<p role="status" className="bg-blue-50 p-3 rounded text-sm">{message}</p>}

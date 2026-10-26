@@ -1,3 +1,4 @@
+import { PROJECT_STACKS } from "../projectStacks";
 import React, { useState, useEffect } from "react";
 import type { StepId, AIModelOption, ProjectSetupData } from "../types";
 import type { AIModelProfile } from "../types/project";
@@ -37,8 +38,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
         projectName: "",
         specFile: null,
         codeSource: null,
-        techStack: "",
-        analysisScope: "",
+        techStack: "auto",
         aiConfig: {
           modelId: "primary", 
           apiKey: "",
@@ -144,8 +144,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           const updatedSetup: ProjectSetupData = {
             projectName: setup?.projectName || "",
             version: setup?.version || 1,
-            techStack: setup?.techStack || "",
-            analysisScope: setup?.analysisScope || "",
+            techStack: setup?.techStack || "auto",
             aiConfig: {
               modelId: llmData?.profile_id || "primary",
               apiKey: "",
@@ -551,33 +550,27 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
             <div className="space-y-2 pt-2 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-3">
               <div className="w-full sm:w-auto">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <label className={VIEW_HEADER.fieldLabel}>
-                      분석 기술 스택
-                    </label>
-                    <Input
-                      type="text"
-                      value={setupData.techStack || ""}
-                      onChange={(e) =>
-                        handleUpdateField("techStack", e.target.value)
-                      }
-                      placeholder="예: Java · Spring Boot"
-                    />
-                  </div>
-                  <div className="space-y-1.5">
-                    <label className={VIEW_HEADER.fieldLabel}>
-                      코드 분석 범위
-                    </label>
-                    <Input
-                      type="text"
-                      value={setupData.analysisScope || ""}
-                      onChange={(e) =>
-                        handleUpdateField("analysisScope", e.target.value)
-                      }
-                      placeholder="예: src/main/java"
-                    />
-                  </div>
+                <div className="space-y-2 max-w-xl">
+                  <label htmlFor="project-tech-stack" className={VIEW_HEADER.fieldLabel}>
+                    분석 기술 스택
+                  </label>
+                  <select
+                    id="project-tech-stack"
+                    value={setupData.techStack || "auto"}
+                    onChange={(e) => handleUpdateField("techStack", e.target.value)}
+                    aria-describedby="project-stack-help source-scope-help"
+                    className="w-full px-3 py-2 text-xs text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500"
+                  >
+                    {PROJECT_STACKS.map((stack) => (
+                      <option key={stack.value} value={stack.value}>{stack.label}</option>
+                    ))}
+                  </select>
+                  <p id="project-stack-help" className="text-xs text-slate-500">
+                    기술 스택은 프로젝트 분류에 사용합니다. 실제 파서는 파일 확장자에 맞춰 선택합니다.
+                  </p>
+                  <p id="source-scope-help" className="text-xs text-slate-500">
+                    ZIP 안의 지원 소스 전체를 분석합니다. Git·의존성·빌드 폴더와 macOS 메타데이터는 자동으로 제외합니다.
+                  </p>
                 </div>
               </div>
 

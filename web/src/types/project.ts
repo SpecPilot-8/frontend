@@ -34,7 +34,6 @@ export interface ProjectSetupData {
   specFile: SpecFileInfo | null;
   codeSource: CodeSourceInfo | null;
   techStack: string;
-  analysisScope: string;
   aiConfig: {
     modelId: string;
     apiKey: string;

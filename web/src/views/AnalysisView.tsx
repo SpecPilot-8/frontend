@@ -321,10 +321,10 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
                     type="button"
                     onClick={approveAll}
                     disabled={busy || editing}
-                    className="text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-full transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-2xs px-3 py-1 rounded-full transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                     title="미확정 요구사항을 한 번에 모두 확정합니다"
                   >
-                    <span>이 문서 미확정 {unapprovedReqs.length}개 검토 확정</span>
+                    <span>미확정 {unapprovedReqs.length}개 전체 검토 확정</span>
                   </button>
                 )}
               </div>
@@ -512,6 +512,23 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
 
         <hr className="my-3 border-slate-100" />
 
+        {unapprovedReqs.length > 0 && (
+          <div className="mb-3">
+            <button
+              type="button"
+              onClick={approveAll}
+              disabled={busy || editing}
+              className="w-full py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-bold text-xs rounded-lg shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
+              title="미확정 요구사항을 한 번에 모두 확정합니다"
+            >
+              <svg className="w-4 h-4 text-emerald-100" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+              </svg>
+              <span>미확정 {unapprovedReqs.length}개 전체 검토 확정</span>
+            </button>
+          </div>
+        )}
+
         <input aria-label="요구사항 검색" className={field} placeholder="요구사항 검색" value={search} onChange={e => setSearch(e.target.value)} />
         <div className="mt-3 space-y-2 max-h-[500px] overflow-y-auto">{reqs.filter(r => `${r.title} ${groupName(r)}`.includes(search)).map(r => <button disabled={editing || busy} onClick={() => setSelectedId(r.id)} key={r.id} className={`w-full text-left p-3 rounded border text-sm transition-colors ${r.id === selectedId ? 'bg-blue-50 border-blue-400' : 'bg-white hover:bg-slate-50'}`}><small className="block text-slate-500">{groupName(r)}</small>{r.title}<small className={`block font-semibold mt-0.5 ${r.review_status === 'approved' ? 'text-emerald-600' : 'text-amber-600'}`}>{r.review_status === 'approved' ? '✓ 검토 확정' : '검토 필요'} · 개정 {r.revision}</small></button>)}</div>
       </Card>
@@ -541,7 +558,16 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
             <Button onClick={approve} disabled={busy || selected.review_status==='approved'} variant={selected.review_status==='approved' ? 'secondary' : 'primary'}>
               {selected.review_status === 'approved' ? '✓ 검토 확정 완료' : '현재 요구사항 검토 확정'}
             </Button>
-
+            {unapprovedReqs.length > 0 && (
+              <Button
+                type="button"
+                onClick={approveAll}
+                disabled={busy}
+                className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium border-transparent ml-auto"
+              >
+                전체 검토 확정 ({unapprovedReqs.length}개 일괄)
+              </Button>
+            )}
           </div>
         </div> : <p className="text-sm text-slate-500">문서를 파싱한 뒤 원문을 선택해 수동 등록할 수 있습니다. 서버 모델 연결과 파싱 경고를 확인하면 AI 요구사항을 추출할 수 있습니다.</p>}
       </Card>

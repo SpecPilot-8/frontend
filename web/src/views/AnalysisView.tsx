@@ -169,31 +169,21 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   const unapprovedReqs = useMemo(() => reqs.filter(r => r.review_status !== 'approved'), [reqs]);
 
   const approveAll = async () => {
-    if (!unapprovedReqs.length) {
-      alert('모든 요구사항이 이미 검토 확정되었습니다.');
-      return;
-    }
-    if (!window.confirm(`검토가 필요한 요구사항 ${unapprovedReqs.length}개를 모두 일괄 확정하시겠습니까?`)) {
-      return;
-    }
+    if (!unapprovedReqs.length || editing || busy) return;
+    if (!window.confirm(`선택한 문서의 미확정 요구사항 ${unapprovedReqs.length}개를 원문과 대조하셨나요? 확인한 내용을 모두 검토 확정합니다.`)) return;
     setBusy(true);
-    setMessage(`요구사항 ${unapprovedReqs.length}개를 일괄 검토 확정하고 있습니다...`);
+    setMessage(`요구사항 ${unapprovedReqs.length}개를 검토 확정하고 있습니다...`);
+    let approved = 0;
     try {
-      await api(`${base}/requirements/review-all`, jsonRequest('POST', {}));
-      await load();
-      setMessage(`전체 ${unapprovedReqs.length}개 요구사항을 모두 검토 확정했습니다.`);
-    } catch {
-      try {
-        await Promise.all(
-          unapprovedReqs.map(r =>
-            api(`${base}/requirements/${r.id}/review`, jsonRequest('PUT', { base_revision: r.revision, status: 'approved' }))
-          )
-        );
-        await load();
-        setMessage(`전체 ${unapprovedReqs.length}개 요구사항을 모두 검토 확정했습니다.`);
-      } catch (err) {
-        setMessage(errorMessage(err));
+      for (const req of unapprovedReqs) {
+        await api(`${base}/requirements/${req.id}/review`, jsonRequest('PUT', { base_revision: req.revision, status: 'approved' }));
+        approved += 1;
       }
+      await load();
+      setMessage(`이 문서의 요구사항 ${approved}개를 검토 확정했습니다.`);
+    } catch (err) {
+      await load().catch(() => undefined);
+      setMessage(`${approved}개 저장 후 중단했습니다. 남은 미확정 항목을 확인하세요. ${errorMessage(err)}`);
     } finally {
       setBusy(false);
     }
@@ -327,11 +317,11 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
                   <button
                     type="button"
                     onClick={approveAll}
-                    disabled={busy}
+                    disabled={busy || editing}
                     className="text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-full transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
                     title="미확정 요구사항을 한 번에 모두 확정합니다"
                   >
-                    <span>✓ 전체 검토 확정 ({unapprovedReqs.length}개)</span>
+                    <span>이 문서 미확정 {unapprovedReqs.length}개 검토 확정</span>
                   </button>
                 )}
               </div>
@@ -513,24 +503,6 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
 
         <hr className="my-3 border-slate-100" />
 
-        {/* 전체 검토 확정 퀵 버튼 */}
-        {unapprovedReqs.length > 0 && (
-          <div className="mb-3">
-            <button
-              type="button"
-              onClick={approveAll}
-              disabled={busy}
-              className="w-full text-xs font-semibold py-2 px-3 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm flex items-center justify-center gap-1.5 transition-colors cursor-pointer disabled:opacity-50"
-              title="미확정 상태인 요구사항들을 한 번에 모두 확정합니다"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-              </svg>
-              <span>미확정 {unapprovedReqs.length}개 전체 검토 확정</span>
-            </button>
-          </div>
-        )}
-
         <input aria-label="요구사항 검색" className={field} placeholder="요구사항 검색" value={search} onChange={e => setSearch(e.target.value)} />
         <div className="mt-3 space-y-2 max-h-[500px] overflow-y-auto">{reqs.filter(r => `${r.title} ${groupName(r)}`.includes(search)).map(r => <button disabled={editing || busy} onClick={() => setSelectedId(r.id)} key={r.id} className={`w-full text-left p-3 rounded border text-sm transition-colors ${r.id === selectedId ? 'bg-blue-50 border-blue-400' : 'bg-white hover:bg-slate-50'}`}><small className="block text-slate-500">{groupName(r)}</small>{r.title}<small className={`block font-semibold mt-0.5 ${r.review_status === 'approved' ? 'text-emerald-600' : 'text-amber-600'}`}>{r.review_status === 'approved' ? '✓ 검토 확정' : '검토 필요'} · 개정 {r.revision}</small></button>)}</div>
       </Card>
@@ -560,11 +532,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
             <Button onClick={approve} disabled={busy || selected.review_status==='approved'} variant={selected.review_status==='approved' ? 'secondary' : 'primary'}>
               {selected.review_status === 'approved' ? '✓ 검토 확정 완료' : '현재 요구사항 검토 확정'}
             </Button>
-            {unapprovedReqs.length > 0 && (
-              <Button onClick={approveAll} disabled={busy} variant="primary" className="bg-emerald-600 hover:bg-emerald-700 text-white font-medium border-transparent ml-auto">
-                ✓ 전체 검토 확정 ({unapprovedReqs.length}개 일괄)
-              </Button>
-            )}
+
           </div>
         </div> : <p className="text-sm text-slate-500">문서를 파싱한 뒤 원문을 선택해 수동 등록할 수 있습니다. 서버 모델 연결과 파싱 경고를 확인하면 AI 요구사항을 추출할 수 있습니다.</p>}
       </Card>

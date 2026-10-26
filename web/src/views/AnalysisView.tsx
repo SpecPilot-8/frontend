@@ -161,6 +161,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
       <Button variant="secondary" onClick={() => onNavigateStep('VERIFICATION')} disabled={editing || busy}>검증 결과로 이동</Button>
     </div>
     {document && blocks.length > 0 && <p className="text-sm text-slate-600">원문 {blocks.length}개 블록을 읽었습니다. {document.parse_status === 'partial' ? '일부 항목은 원문 확인이 필요합니다.' : '문서 읽기를 마쳤습니다.'}</p>}
+    {reqs.length > 0 && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">저장된 요구사항 {reqs.length}개 · 수락 조건 {reqs.reduce((sum, r) => sum + r.conditions.length, 0)}개. 원문과 비교한 뒤 검토를 확정하세요.</p>}
     {document?.parser_version && document.parser_version !== 'pdf-layout-2' && <p className="text-sm text-amber-800">이전 OCR 결과입니다. 한국어 OCR 설정을 적용한 뒤 ‘문서 다시 파싱’을 눌러주세요. 저장된 요구사항이 있다면 새 문서로 등록해야 합니다.</p>}
     {document?.warnings?.length ? <ParsingWarnings warnings={document.warnings} fileUrl={`${BASE_URL}${base}/documents/${docId}/file`} /> : null}
     {document && blocks.length > 0 && reqs.length === 0 && <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2 text-sm">

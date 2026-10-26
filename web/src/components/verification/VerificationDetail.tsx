@@ -43,6 +43,8 @@ interface VerificationDetailData {
   condition_verdicts?: ConditionVerdict[];
   call_flow?: {
     nodes?: CallFlowNode[];
+    edges?: { from: string; to: string }[];
+    unresolved?: string[];
   };
   evidence?: EvidenceItem[];
   counts?: {
@@ -152,7 +154,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
           <div className="flex justify-between items-end mb-6 border-b border-slate-100 pb-4">
             <div>
               <h3 className="text-base font-bold text-slate-900 mb-1.5">
-                관련 호출 흐름 · 코드 근거
+                정적 참조 흐름 · 코드 근거
               </h3>
               <p className="text-[13px] text-slate-500">
                 파일·줄 번호별로 펼쳐 확인하세요. 목록이 길면 아래로 스크롤할 수 있습니다.
@@ -168,8 +170,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
             verificationData.call_flow.nodes.length > 0 && (
               <div className="flex flex-wrap items-center gap-2 text-[13px] text-slate-600 mb-6 bg-slate-50 py-2.5 px-4 rounded-lg">
                 {verificationData.call_flow.nodes.map(
-                  (node: CallFlowNode, idx: number) => {
-                    const nodesList = verificationData.call_flow?.nodes ?? [];
+                  (node: CallFlowNode) => {
                     return (
                       <React.Fragment key={node.id}>
                         <button
@@ -182,15 +183,16 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                         >
                           {node.label}
                         </button>
-                        {idx < nodesList.length - 1 && (
-                          <span className="text-slate-300">→</span>
-                        )}
+
                       </React.Fragment>
                     );
                   },
                 )}
               </div>
             )}
+
+          {verificationData.call_flow?.edges?.length ? <div className="text-xs text-slate-500 mb-3 space-y-1">{verificationData.call_flow.edges.map((edge, index) => <p key={index}>{verificationData.call_flow?.nodes?.find(n => n.id === edge.from)?.label} → {verificationData.call_flow?.nodes?.find(n => n.id === edge.to)?.label}</p>)}</div> : null}
+          {verificationData.call_flow?.unresolved?.map((warning, index) => <p className="text-xs text-amber-700 mb-3" key={index}>{warning}</p>)}
 
           {(!verificationData.evidence ||
             verificationData.evidence.length === 0) && (

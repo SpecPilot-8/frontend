@@ -75,22 +75,77 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     return () => { active = false; };
   }, [activeJob, projectId, load]);
 
-  const prepare = async () => {
+  const fetchVerificationInput = async () => {
+    const [snapshots, requirements, config] = await Promise.all([
+      fetchAll<{ id: string }>(`${base}/code/snapshots`),
+      fetchAll<RequirementItem & { revision: number }>(`${base}/requirements`),
+      api<{ config_version: number; connection_status: string }>(`${base}/llm`),
+    ]);
+    if (!snapshots.length) throw new Error('코드를 먼저 등록·인덱싱하세요.');
+    const approved = requirements.filter(r => r.review_status === 'approved');
+    if (!approved.length) throw new Error('요구사항을 먼저 검토 확정하세요.');
+    if (config.connection_status !== 'connected') throw new Error('프로젝트 설정에서 서버 모델의 실제 연결을 먼저 확인하세요.');
+    return {
+      snapshot_id: snapshots.at(-1)!.id,
+      requirement_versions: approved.map(r => ({ requirement_id: r.id, revision: r.revision })),
+      model_config_version: config.config_version,
+    };
+  };
+
+  const startAutoVerification = async () => {
+    setBusy(true); setMessage('검증 요구사항과 소스코드를 확인하고 있습니다...');
+    try {
+      const input = await fetchVerificationInput();
+      const options = await api<ScopeOptions>(`${base}/verification-runs/prepare`, jsonRequest('POST', input));
+
+      // AI 및 키워드 휴리스틱으로 추론된 추천 진입 파일들로 자동 구성
+      const defaultStack = ['spring', 'react'].includes(options.stack) ? (options.stack as 'spring' | 'react') : 'react';
+      const autoEntries: Record<string, string[]> = {};
+      for (const group of options.groups) {
+        if (group.suggested_files && group.suggested_files.length > 0) {
+          autoEntries[group.key] = group.suggested_files;
+        } else if (options.files.length > 0) {
+          autoEntries[group.key] = [options.files[0]];
+        }
+      }
+
+      const autoScope: VerificationScope = {
+        stack: defaultStack,
+        entries: autoEntries,
+        confirmed: true,
+      };
+
+      setMessage('AI가 연관 코드 및 화면 범위를 자동 분석하여 검증을 시작합니다...');
+      const job = await api<Job>(`${base}/verification-runs`, jsonRequest('POST', { ...input, scope_config: autoScope }));
+      setScopeOptions(null); setPendingInput(null); setSelected(null); setSearch(''); setFilter('');
+      await load();
+      if (job.result_ref) setRunId(job.result_ref.id);
+      if (['queued', 'running'].includes(job.status)) {
+        setActiveJob(job.id);
+      } else {
+        setMessage(job.error?.message || job.missing_features?.map(f => f.message).join(' / ') || '검증 실패');
+        setBusy(false);
+      }
+    } catch (e) {
+      setMessage(errorMessage(e));
+      setBusy(false);
+    }
+  };
+
+  const openManualScope = async () => {
     setBusy(true); setMessage('');
     try {
-      const [snapshots, requirements, config] = await Promise.all([
-        fetchAll<{ id: string }>(`${base}/code/snapshots`), fetchAll<RequirementItem & { revision: number }>(`${base}/requirements`),
-        api<{ config_version: number; connection_status: string }>(`${base}/llm`),
-      ]);
-      if (!snapshots.length) throw new Error('코드를 먼저 등록·인덱싱하세요.');
-      const approved = requirements.filter(r => r.review_status === 'approved');
-      if (!approved.length) throw new Error('요구사항을 먼저 검토 확정하세요.');
-      if (config.connection_status !== 'connected') throw new Error('프로젝트 설정에서 서버 모델의 실제 연결을 먼저 확인하세요.');
-      const input = { snapshot_id: snapshots.at(-1)!.id, requirement_versions: approved.map(r => ({ requirement_id: r.id, revision: r.revision })), model_config_version: config.config_version };
+      const input = await fetchVerificationInput();
       const options = await api<ScopeOptions>(`${base}/verification-runs/prepare`, jsonRequest('POST', input));
-      setPendingInput(input); setScopeOptions(options);
-    } catch (e) { setMessage(errorMessage(e)); } finally { setBusy(false); }
+      setPendingInput(input);
+      setScopeOptions(options);
+    } catch (e) {
+      setMessage(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
   };
+
   const start = async (scope: VerificationScope) => {
     if (!pendingInput) return;
     setBusy(true); setMessage('검증 작업을 접수하고 있습니다.');
@@ -125,7 +180,21 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     <PageHeader stepTag="03 / VERIFICATION" title="검증 결과" description="선택한 실행의 요구사항 개정·코드 스냅샷을 기준으로 판정과 근거를 확인합니다." />
     {message && <p role="status" className="p-3 bg-blue-50 rounded text-sm">{message}</p>}
     {scopeOptions && <VerificationScopeDialog options={scopeOptions} busy={busy} onCancel={() => { setScopeOptions(null); setPendingInput(null); setMessage('검증 설정을 취소했습니다. 모델을 호출하지 않았습니다.'); }} onRun={start} />}
-    <div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={prepare}>코드 검증 시작</Button><Button variant="secondary" onClick={() => onNavigateStep('ANALYSIS')}>명세 검토로 이동</Button><Button variant="secondary" onClick={() => onNavigateStep('SETUP')}>모델·코드 설정</Button><Button variant="secondary" onClick={() => onNavigateStep('TEST_SPEC')}>테스트 사양서로 이동</Button></div>
+    <div className="flex flex-wrap items-center gap-2">
+      <Button disabled={busy} onClick={startAutoVerification}>코드 검증 시작</Button>
+      <button
+        type="button"
+        disabled={busy}
+        onClick={openManualScope}
+        className="text-xs text-slate-500 hover:text-slate-700 underline px-1 py-1 cursor-pointer disabled:opacity-50"
+        title="필요한 경우에만 화면별 진입 파일을 직접 지정합니다"
+      >
+        진입 파일 수동 지정 (고급)
+      </button>
+      <Button variant="secondary" onClick={() => onNavigateStep('ANALYSIS')}>명세 검토로 이동</Button>
+      <Button variant="secondary" onClick={() => onNavigateStep('SETUP')}>모델·코드 설정</Button>
+      <Button variant="secondary" onClick={() => onNavigateStep('TEST_SPEC')}>테스트 사양서로 이동</Button>
+    </div>
     <Card title="요구사항 추적표" description={run ? `실행 상태: ${run.status} · 스냅샷 ${run.snapshot_id}` : '아직 검증 실행이 없습니다'}>
       <div className="flex flex-wrap gap-3 mb-4"><select aria-label="검증 실행 선택" value={runId} disabled={busy} onChange={e => { setRunId(e.target.value); setMessage(''); }} className="border rounded p-2 max-w-sm">{runs.map(r => <option key={r.id} value={r.id}>{r.created_at} · {r.status}</option>)}</select><input aria-label="추적표 검색" placeholder="기능·주제 검색" value={search} onChange={e => setSearch(e.target.value)} className="border rounded p-2" /><select aria-label="판정 필터" value={filter} onChange={e => setFilter(e.target.value)} className="border rounded p-2"><option value="">전체</option>{Object.entries(labels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select><Button disabled={!runId || busy} onClick={exportTrace}>실행 전체 Excel 출력</Button></div>
       <p className="text-xs text-slate-500 mb-3">Excel은 현재 검색·필터와 관계없이 선택한 검증 실행 전체를 출력합니다.</p>

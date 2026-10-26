@@ -2,9 +2,10 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { StepId, Condition, RequirementItem } from '../types';
 import { useProject } from '../contexts/ProjectContext';
 import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } from '../services/api';
+import { ParsingWarnings } from '../components/ParsingWarnings';
 import { Button, Card, PageHeader } from '../components/common';
 
-interface Doc { id: string; filename: string; revision: number; parse_status: string; warnings: { message: string }[] }
+interface Doc { id: string; filename: string; revision: number; parse_status: string; parser_version?: string; warnings: { code?: string; message: string }[] }
 interface Block { id: string; text: string; location: { index: number }; structure: { section: string; label: string | null } }
 interface Group { id: string; title: string; subtopics: { id: string; title: string }[] }
 type Req = RequirementItem & { revision: number; document_id: string; document_revision: number; source_refs: { block_id: string; quote: string }[] };
@@ -96,7 +97,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     if (!document) return;
     setBusy(true); setMessage('문서의 화면 표와 원문을 읽고 있습니다.');
     try {
-      const job = await api<{ id: string }>(`${base}/documents/${docId}/parse`, jsonRequest('POST', { document_revision: document.revision }));
+      const job = await api<{ id: string }>(`${base}/documents/${docId}/parse`, jsonRequest('POST', { document_revision: document.revision, force: blocks.length > 0 }));
       const result = await pollJobStatus(projectId!, job.id) as { status: string };
       await load(); setMessage(result.status === 'completed' ? '문서 파싱을 마쳤습니다. 경고와 원문을 확인하세요.' : '파싱에 실패했습니다. 문서 경고를 확인하세요.');
     } catch (e) { setMessage(errorMessage(e)); } finally { setBusy(false); }
@@ -125,12 +126,14 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     {message && <p role="status" className="p-3 rounded bg-blue-50 text-sm whitespace-pre-wrap">{message}</p>}
     <div className="flex flex-wrap gap-2">
       <select aria-label="기획서 선택" className={field + ' max-w-sm'} value={docId} disabled={editing || busy} onChange={e => setDocId(e.target.value)}>{docs.map(d => <option key={d.id} value={d.id}>{d.filename} · 개정 {d.revision}</option>)}</select>
-      <Button onClick={parse} disabled={!document || busy || editing}>문서 파싱</Button>
+      <Button onClick={parse} disabled={!document || busy || editing || reqs.length > 0}>{blocks.length ? "문서 다시 파싱" : "문서 파싱"}</Button>
       <Button variant="secondary" onClick={extract} disabled={!blocks.length || busy || editing}>AI 요구사항 추출</Button>
       <Button onClick={() => startEdit(true)} disabled={!document || busy || editing}>요구사항 수동 추가</Button>
       <Button variant="secondary" onClick={() => onNavigateStep('VERIFICATION')} disabled={editing || busy}>검증 결과로 이동</Button>
     </div>
-    {document?.warnings?.length ? <details className="text-amber-800 text-sm"><summary>파싱 경고 {document.warnings.length}건 · {document.parse_status}</summary>{document.warnings.map((w,i) => <p key={i}>{w.message}</p>)}</details> : null}
+    {document && blocks.length > 0 && <p className="text-sm text-slate-600">원문 {blocks.length}개 블록을 읽었습니다. {document.parse_status === 'partial' ? '일부 항목은 원문 확인이 필요합니다.' : '문서 읽기를 마쳤습니다.'}</p>}
+    {document?.parser_version && document.parser_version !== 'pdf-layout-2' && <p className="text-sm text-amber-800">이전 OCR 결과입니다. 한국어 OCR 설정을 적용한 뒤 ‘문서 다시 파싱’을 눌러주세요. 저장된 요구사항이 있다면 새 문서로 등록해야 합니다.</p>}
+    {document?.warnings?.length ? <ParsingWarnings warnings={document.warnings} fileUrl={`${BASE_URL}${base}/documents/${docId}/file`} /> : null}
     <div className="grid xl:grid-cols-[300px_1fr] gap-5">
       <Card title="문서 원문" description={`${blocks.length}개 블록`}>
         <select aria-label="원문 블록 선택" className={field} value={blockId} disabled={editing && !isNew} onChange={e => setBlockId(e.target.value)}>

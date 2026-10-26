@@ -448,59 +448,64 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     <div className="grid xl:grid-cols-[320px_1fr] gap-5">
       <Card title="문서 원문" description={`${blocks.length}개 블록`}>
         {/* 원문 출처 쪽수 필터 및 카테고리 드롭다운 */}
-        <div className="space-y-2 mb-3">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-700">원문 출처 선택</span>
-            {availablePages.length > 1 && (
-              <div className="flex items-center gap-1 text-[11px] text-slate-500">
-                <label htmlFor="page-filter">쪽수 필터:</label>
-                <select
-                  id="page-filter"
-                  value={selectedPageFilter}
-                  onChange={e => setSelectedPageFilter(e.target.value)}
-                  className="border border-slate-200 rounded px-1.5 py-0.5 text-[11px] bg-slate-50 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="all">전체 쪽수 ({availablePages.length}쪽)</option>
-                  {availablePages.map(p => (
-                    <option key={p} value={String(p)}>
-                      {p}쪽 {screenMap[p] || ''} ({blocksByPage[p]?.length || 0}개)
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-          </div>
+        <div className="space-y-3 mb-4 p-3 bg-slate-50/80 rounded-xl border border-slate-200/80">
+          {availablePages.length > 1 && (
+            <div>
+              <label htmlFor="page-filter" className="block text-xs font-bold text-slate-700 mb-1.5">
+                📄 페이지(쪽수) 필터
+              </label>
+              <select
+                id="page-filter"
+                value={selectedPageFilter}
+                onChange={e => setSelectedPageFilter(e.target.value)}
+                className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              >
+                <option value="all">전체 페이지 보기 ({availablePages.length}쪽 · {blocks.length}개 블록)</option>
+                {availablePages.map(p => (
+                  <option key={p} value={String(p)}>
+                    {p}쪽{screenMap[p] || ''} ({blocksByPage[p]?.length || 0}개 블록)
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
 
-          <select
-            aria-label="원문 블록 선택"
-            className={field}
-            value={blockId}
-            disabled={editing && !isNew}
-            onChange={e => setBlockId(e.target.value)}
-          >
-            <option value="">출처를 선택하세요 ({filteredBlocks.length}개 블록)</option>
-            {selectedPageFilter === 'all' ? (
-              availablePages.map(p => {
-                const pBlocks = blocksByPage[p] || [];
-                const title = `${p}쪽${screenMap[p] || ''} (${pBlocks.length}개)`;
-                return (
-                  <optgroup key={p} label={title}>
-                    {pBlocks.map(b => (
-                      <option key={b.id} value={b.id}>
-                        {b.structure.section}{b.structure.label ? ` [${b.structure.label}]` : ''} · {b.text.slice(0, 35)}
-                      </option>
-                    ))}
-                  </optgroup>
-                );
-              })
-            ) : (
-              filteredBlocks.map(b => (
-                <option key={b.id} value={b.id}>
-                  {b.location.index}쪽 · {b.structure.section}{b.structure.label ? ` [${b.structure.label}]` : ''} · {b.text.slice(0, 35)}
-                </option>
-              ))
-            )}
-          </select>
+          <div>
+            <label htmlFor="source-block-select" className="block text-xs font-bold text-slate-700 mb-1.5">
+              📌 원문 출처 블록 선택
+            </label>
+            <select
+              id="source-block-select"
+              aria-label="원문 블록 선택"
+              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors"
+              value={blockId}
+              disabled={editing && !isNew}
+              onChange={e => setBlockId(e.target.value)}
+            >
+              <option value="">출처를 선택하세요 ({filteredBlocks.length}개 블록)</option>
+              {selectedPageFilter === 'all' ? (
+                availablePages.map(p => {
+                  const pBlocks = blocksByPage[p] || [];
+                  const title = `${p}쪽${screenMap[p] || ''} (${pBlocks.length}개)`;
+                  return (
+                    <optgroup key={p} label={title}>
+                      {pBlocks.map(b => (
+                        <option key={b.id} value={b.id}>
+                          {b.structure.section}{b.structure.label ? ` [${b.structure.label}]` : ''} · {b.text.slice(0, 35)}
+                        </option>
+                      ))}
+                    </optgroup>
+                  );
+                })
+              ) : (
+                filteredBlocks.map(b => (
+                  <option key={b.id} value={b.id}>
+                    {b.location.index}쪽 · {b.structure.section}{b.structure.label ? ` [${b.structure.label}]` : ''} · {b.text.slice(0, 35)}
+                  </option>
+                ))
+              )}
+            </select>
+          </div>
         </div>
 
         {source && <><p className="text-sm whitespace-pre-wrap my-4 select-text bg-slate-50 p-2.5 rounded border border-slate-100">{source.text}</p><a className="text-blue-600 text-sm font-medium hover:underline inline-block mb-3" target="_blank" rel="noreferrer" href={`${BASE_URL}${base}/documents/${docId}/file#page=${source.location.index}`}>PDF {source.location.index}쪽 원문 열기 ↗</a></>}

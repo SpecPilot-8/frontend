@@ -35,6 +35,10 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     }
     return () => {active=false;};
   },[runId,base,filter,search]);
+  const handleRunChange = (id: string) => {
+    setRunId(id);
+    setMessage('');
+  };
   const verify = async () => {
     setBusy(true);setMessage('');
     try {
@@ -69,7 +73,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     {message&&<p role="status" className="p-3 bg-blue-50 rounded text-sm">{message}</p>}
     <div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={verify}>코드 검증 시작</Button><Button variant="secondary" onClick={()=>onNavigateStep('ANALYSIS')}>명세 검토로 이동</Button><Button variant="secondary" onClick={()=>onNavigateStep('TEST_SPEC')}>테스트 사양서로 이동</Button></div>
     <Card title="요구사항 추적표" description={run ? `실행 상태: ${run.status} · 스냅샷 ${run.snapshot_id}`:'아직 검증 실행이 없습니다'}>
-      <div className="flex flex-wrap gap-3 mb-4"><select aria-label="검증 실행 선택" value={runId} onChange={e=>setRunId(e.target.value)} className="border rounded p-2 max-w-sm">{runs.map(r=><option key={r.id} value={r.id}>{r.created_at} · {r.status}</option>)}</select><input aria-label="추적표 검색" placeholder="기능·주제 검색" value={search} onChange={e=>setSearch(e.target.value)} className="border rounded p-2"/><select aria-label="판정 필터" value={filter} onChange={e=>setFilter(e.target.value)} className="border rounded p-2"><option value="">전체</option>{Object.entries(labels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select><Button disabled={!runId||busy} onClick={exportTrace}>추적표 Excel 출력</Button></div>
+      <div className="flex flex-wrap gap-3 mb-4"><select aria-label="검증 실행 선택" value={runId} onChange={e=>handleRunChange(e.target.value)} className="border rounded p-2 max-w-sm">{runs.map(r=><option key={r.id} value={r.id}>{r.created_at} · {r.status}</option>)}</select><input aria-label="추적표 검색" placeholder="기능·주제 검색" value={search} onChange={e=>setSearch(e.target.value)} className="border rounded p-2"/><select aria-label="판정 필터" value={filter} onChange={e=>setFilter(e.target.value)} className="border rounded p-2"><option value="">전체</option>{Object.entries(labels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select><Button disabled={!runId||busy} onClick={exportTrace}>추적표 Excel 출력</Button></div>
       <p className="text-sm mb-4">선택 범위 {summary.total||0}건 · 구현됨 {summary.implemented||0}건 · 구현율 {(summary.implementation_rate||0).toFixed(1)}% · 미분석 {summary.not_run||0}건</p>
       <div className="overflow-auto"><table className="w-full text-sm text-left"><thead><tr>{['주제 / 소주제','기능명','판정','근거','사유','상세'].map(v=><th className="p-3 border-b" key={v}>{v}</th>)}</tr></thead><tbody>{rows.map(r=><tr key={r.requirement_id}><td className="p-3 border-b">{r.topic_title} / {r.subtopic_title}</td><td className="p-3 border-b">{r.title}<small className="block">개정 {r.requirement_revision}</small></td><td className="p-3 border-b">{labels[r.status||'not_run']}<small className="block">{r.analysis_state}</small></td><td className="p-3 border-b">{r.evidence_count}곳</td><td className="p-3 border-b">{r.reason}</td><td className="p-3 border-b"><Button onClick={()=>setSelected(r)}>상세 보기</Button></td></tr>)}</tbody></table></div>
     </Card>

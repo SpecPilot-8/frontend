@@ -1,5 +1,5 @@
 import { PROJECT_STACKS } from "../projectStacks";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import type { StepId, ProjectSetupData } from "../types";
 import type { AIModelProfile } from "../types/project";
 import {
@@ -28,7 +28,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
   onProjectUpdated,
   initialData,
 }) => {
-  const { projectId, setProjectId } = useProject();
+  const { projectId, setProjectId, unsavedChanges, setUnsavedChanges, saveBeforeLeaveRef } = useProject();
 
   const [setupData, setSetupData] = useState<ProjectSetupData | null>(() => {
     if (initialData) return initialData;
@@ -66,6 +66,20 @@ export const SetupView: React.FC<SetupViewProps> = ({
   const [codeFile, setCodeFile] = useState<File | null>(null);
 
   useEffect(() => {
+    const warn = (e: BeforeUnloadEvent) => {
+      if (unsavedChanges) e.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [unsavedChanges]);
+
+  useEffect(() => {
+    return () => {
+      setUnsavedChanges(false);
+    };
+  }, [setUnsavedChanges]);
+
+  useEffect(() => {
     api<{ items: AIModelProfile[] }>("/model-profiles")
       .then((data) => setModelProfiles(data.items))
       .catch(() => setConnectionErrorMsg("서버 모델 설정을 불러오지 못했습니다. 백엔드 연결을 확인하세요."));
@@ -83,6 +97,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     accept: ".pdf",
     onFileSelect: (selectedFile) => {
       setSpecFile(selectedFile);
+      setUnsavedChanges(true);
       handleUpdateField("specFile", {
         fileName: selectedFile.name,
         pageCount: undefined,
@@ -100,6 +115,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     accept: ".zip",
     onFileSelect: (selectedFile) => {
       setCodeFile(selectedFile);
+      setUnsavedChanges(true);
       handleUpdateField("codeSource", {
         type: "ZIP",
         sourceName: selectedFile.name,
@@ -156,6 +172,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           }
 
           setSetupData(updatedSetup);
+          setUnsavedChanges(false);
           onProjectUpdated?.(updatedSetup.projectName);
         }
       })
@@ -165,7 +182,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       .finally(() => {
         setIsLoading(false);
       });
-  }, [initialData, projectId, onProjectUpdated, isSaving]);
+  }, [initialData, projectId, onProjectUpdated, isSaving, setUnsavedChanges]);
 
   const currentModel =
     modelProfiles.find((m) => m.id === "primary");
@@ -175,6 +192,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     value: ProjectSetupData[K],
   ) => {
     if (!setupData) return;
+    setUnsavedChanges(true);
     const updated = { ...setupData, [field]: value };
     setSetupData(updated);
     if (field === "projectName" && typeof value === "string") {
@@ -187,6 +205,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     value: string | boolean | number,
   ) => {
     if (!setupData) return;
+    setUnsavedChanges(true);
     setSetupData(prev => prev ? ({ ...prev, aiConfig: { ...prev.aiConfig, [key]: value,
       ...((key === "modelId" || key === "apiKey") ? { isConnected: false } : {}) } }) : prev);
     if (key === "modelId" || key === "apiKey") {
@@ -195,10 +214,10 @@ export const SetupView: React.FC<SetupViewProps> = ({
     }
   };
 
-  const handleSaveAndUpload = async () => {
+  const handleSaveAndUpload = useCallback(async (): Promise<boolean> => {
     if (!setupData || !setupData.projectName.trim()) {
       alert("프로젝트 이름을 입력해주세요.");
-      return;
+      return false;
     }
 
     setIsSaving(true);
@@ -271,19 +290,30 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
         setCodeFile(null);
         setIsUploaded(Boolean(specFile || setupData.specFile?.fileName));
+        setUnsavedChanges(false);
         alert("프로젝트 저장 및 파일 업로드가 완료되었습니다. 서버 모델 연결을 확인할 수 있습니다.");
+        return true;
       } else {
         alert(`프로젝트 저장 실패: ${response.error || "알 수 없는 오류"}`);
+        return false;
       }
     } catch (error: unknown) {
       console.error(error);
       const msg = error instanceof Error ? error.message : "알 수 없는 오류";
       alert(`프로젝트 설정 저장 중 오류가 발생했습니다:\n${msg}`);
+      return false;
     } finally {
       setIsSaving(false);
       setSavingMessage("");
     }
-  };
+  }, [setupData, projectId, specFile, codeSourceTab, codeFile, setProjectId, setUnsavedChanges]);
+
+  useEffect(() => {
+    saveBeforeLeaveRef.current = unsavedChanges ? handleSaveAndUpload : null;
+    return () => {
+      saveBeforeLeaveRef.current = null;
+    };
+  }, [saveBeforeLeaveRef, unsavedChanges, handleSaveAndUpload]);
 
   const handleVerifyApiKey = async () => {
     if (!projectId) {

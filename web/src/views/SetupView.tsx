@@ -375,12 +375,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
     <div className="max-w-6xl mx-auto py-2 px-2 md:px-4 space-y-5">
       <PageHeader
         stepTag="01 / PROJECT SETUP"
-        title={setupData.projectName ? "프로젝트 설정" : "새 프로젝트 만들기"}
-        description={
-          setupData.projectName
-            ? "명세 문서와 검증할 코드를 연결하고 분석 범위를 확인하세요."
-            : "먼저 명세와 코드를 연결하세요. 분석 설정은 이후에도 바꿀 수 있습니다."
-        }
+        title="프로젝트 설정"
+        description="명세 문서와 검증할 코드를 연결하고 프로젝트를 준비하세요."
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">

@@ -3,6 +3,7 @@ import type { StepId, Condition, RequirementItem } from '../types';
 import { useProject } from '../contexts/ProjectContext';
 import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } from '../services/api';
 import { ParsingWarnings } from '../components/ParsingWarnings';
+import { ExtractionLoadingModal } from '../components/ExtractionLoadingModal';
 import { Button, Card, PageHeader } from '../components/common';
 
 interface Doc { id: string; filename: string; revision: number; parse_status: string; parser_version?: string; screens?: { page: number }[]; warnings: { code?: string; message: string }[] }
@@ -33,6 +34,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [activeJobId, setActiveJobId] = useState('');
+  const [extractProgress, setExtractProgress] = useState<{ completed: number; total: number } | null>(null);
   const [acknowledgedFor, setAcknowledgedFor] = useState('');
   const selected = reqs.find(r => r.id === selectedId);
   const document = docs.find(d => d.id === docId);
@@ -70,7 +72,14 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
       setBusy(true);
       try {
         const done = await pollJobStatus(projectId, activeJobId, job => {
-          if (active) setMessage(job.progress ? `AI 요구사항 추출 중 · 화면 ${job.progress.completed}/${job.progress.total}` : 'AI 요구사항 추출 대기 중');
+          if (active) {
+            if (job.progress) {
+              setExtractProgress(job.progress);
+              setMessage(`AI 요구사항 추출 중 · 화면 ${job.progress.completed}/${job.progress.total}`);
+            } else {
+              setMessage('AI 요구사항 추출 대기 중');
+            }
+          }
         }) as ExtractionJob;
         if (!active) return;
         await load();
@@ -78,7 +87,13 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
           ? `요구사항 ${done.result?.requirement_count || 0}개 · 수락 조건 ${done.result?.condition_count || 0}개를 추출했습니다. 원문과 비교해 검토를 확정하세요.`
           : done.error?.message || done.missing_features?.map(f => f.message).join(' / ') || `분석 상태: ${done.status}`);
       } catch (e) { if (active) setMessage(errorMessage(e)); }
-      finally { if (active) { setBusy(false); setActiveJobId(''); } }
+      finally {
+        if (active) {
+          setBusy(false);
+          setActiveJobId('');
+          setExtractProgress(null);
+        }
+      }
     });
     return () => { active = false; };
   }, [activeJobId, projectId, load]);
@@ -150,16 +165,203 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     catch (e) { setMessage(errorMessage(e)); } finally { setBusy(false); }
   };
   if (!projectId) return <Button onClick={() => onNavigateStep('SETUP')}>프로젝트를 먼저 선택하세요</Button>;
-  return <div className="max-w-7xl mx-auto space-y-5">
-    <PageHeader stepTag="02 / REQUIREMENT ANALYSIS" title="명세 분석" description="원문에서 요구사항을 검토하고 주제·소주제별로 수락 조건을 확정합니다." />
-    {message && <p role="status" className="p-3 rounded bg-blue-50 text-sm whitespace-pre-wrap">{message}</p>}
-    <div className="flex flex-wrap gap-2">
-      <select aria-label="기획서 선택" className={field + ' max-w-sm'} value={docId} disabled={editing || busy} onChange={e => setDocId(e.target.value)}>{docs.map(d => <option key={d.id} value={d.id}>{d.filename} · 개정 {d.revision}</option>)}</select>
-      <Button onClick={parse} disabled={!document || busy || editing || reqs.length > 0}>{blocks.length ? "문서 다시 파싱" : "문서 파싱"}</Button>
-      <Button variant="secondary" onClick={extract} disabled={!blocks.length || busy || editing || !warningAccepted || reqs.length > 0 || document?.parser_version !== 'pdf-layout-2'}>AI 요구사항 추출</Button>
-      <Button onClick={() => startEdit(true)} disabled={!document || busy || editing}>요구사항 수동 추가</Button>
-      <Button variant="secondary" onClick={() => onNavigateStep('VERIFICATION')} disabled={editing || busy}>검증 결과로 이동</Button>
-    </div>
+
+  const canExtract = Boolean(
+    blocks.length > 0 &&
+    !busy &&
+    !editing &&
+    warningAccepted &&
+    reqs.length === 0 &&
+    document?.parser_version === 'pdf-layout-2'
+  );
+
+  return (
+    <div className="max-w-7xl mx-auto space-y-5">
+      {/* AI 요구사항 추출 전용 로딩 모달 */}
+      <ExtractionLoadingModal
+        isOpen={Boolean(activeJobId)}
+        progress={extractProgress}
+        statusText={message}
+      />
+
+      <PageHeader
+        stepTag="02 / REQUIREMENT ANALYSIS"
+        title="명세 분석"
+        description="원문에서 요구사항을 검토하고 주제·소주제별로 수락 조건을 확정합니다."
+        action={
+          <Button
+            variant={reqs.length > 0 ? "primary" : "secondary"}
+            size="md"
+            onClick={() => onNavigateStep('VERIFICATION')}
+            disabled={editing || busy}
+            className="flex items-center gap-1.5 shadow-sm font-semibold"
+          >
+            <span>검증 결과로 이동</span>
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14 5l7 7m0 0l-7 7m7-7H3" />
+            </svg>
+          </Button>
+        }
+      />
+
+      {message && !activeJobId && (
+        <p role="status" className="p-3 rounded-lg bg-blue-50 border border-blue-100 text-blue-900 text-sm whitespace-pre-wrap">
+          {message}
+        </p>
+      )}
+
+      {/* 명세 분석 워크플로우 컨트롤 바 */}
+      <div className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-sm space-y-3.5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+          {/* 기획서 선택 및 문서 상태 */}
+          <div className="flex flex-wrap items-center gap-2.5">
+            <label htmlFor="doc-select" className="text-xs font-semibold text-slate-700 flex items-center gap-1.5">
+              <svg className="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
+              기획서 선택:
+            </label>
+            <select
+              id="doc-select"
+              aria-label="기획서 선택"
+              className="px-3 py-1.5 text-xs text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 max-w-sm font-medium"
+              value={docId}
+              disabled={editing || busy}
+              onChange={e => setDocId(e.target.value)}
+            >
+              {docs.map(d => (
+                <option key={d.id} value={d.id}>
+                  {d.filename} · 개정 {d.revision}
+                </option>
+              ))}
+            </select>
+
+            {/* 상태 뱃지 */}
+            {blocks.length > 0 ? (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200/60">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                원문 {blocks.length}개 블록 파싱 완료
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200/60">
+                문서 파싱 필요
+              </span>
+            )}
+
+            {reqs.length > 0 && (
+              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200/60">
+                요구사항 {reqs.length}개 ({reqs.filter(r => r.review_status === 'approved').length}개 확정)
+              </span>
+            )}
+          </div>
+
+          {/* 파이프라인 단계 인디케이터 */}
+          <div className="text-xs flex items-center gap-1.5 text-slate-400">
+            <span className="font-semibold text-slate-600">진행 순서:</span>
+            <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${blocks.length === 0 ? "bg-blue-100 text-blue-700 font-bold" : "bg-slate-100 text-slate-600"}`}>
+              1. 문서 파싱
+            </span>
+            <span>→</span>
+            <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${blocks.length > 0 && reqs.length === 0 ? "bg-indigo-100 text-indigo-700 font-bold animate-pulse" : "bg-slate-100 text-slate-600"}`}>
+              2. 요구사항 추출
+            </span>
+            <span>→</span>
+            <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${reqs.length > 0 ? "bg-emerald-100 text-emerald-700 font-bold" : "bg-slate-100 text-slate-600"}`}>
+              3. 조건 검토 및 확정
+            </span>
+          </div>
+        </div>
+
+        {/* 액션 버튼 그룹 & 안내 */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+          <div className="flex flex-wrap items-center gap-2.5">
+            {/* 1단계: 문서 파싱 버튼 */}
+            <Button
+              onClick={parse}
+              variant={blocks.length === 0 ? "primary" : "secondary"}
+              disabled={!document || busy || editing || reqs.length > 0}
+              className="flex items-center gap-1.5 shadow-sm"
+              title={reqs.length > 0 ? "이미 등록된 요구사항이 있습니다. 새 문서를 등록해 파싱하세요." : "PDF 원문 표와 텍스트를 읽어옵니다"}
+            >
+              {blocks.length === 0 ? (
+                <>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                  </svg>
+                  <span>문서 파싱 시작</span>
+                </>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  <span>문서 다시 파싱</span>
+                </>
+              )}
+            </Button>
+
+            <div className="h-5 w-px bg-slate-200 hidden sm:block" />
+
+            {/* 2단계: AI 요구사항 자동 추출 버튼 */}
+            <Button
+              onClick={extract}
+              variant="primary"
+              disabled={!canExtract}
+              className={`flex items-center gap-1.5 shadow-sm border-transparent transition-all ${
+                canExtract
+                  ? "bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold ring-2 ring-indigo-300 ring-offset-1"
+                  : ""
+              }`}
+              title={
+                !blocks.length
+                  ? "먼저 문서 파싱을 실행하세요"
+                  : reqs.length > 0
+                    ? "요구사항이 이미 등록되었습니다"
+                    : !warningAccepted
+                      ? "하단의 OCR/표 경고 확인 체크박스를 선택하세요"
+                      : "AI가 화면별 명세에서 요구사항과 수락 조건을 자동 추출합니다"
+              }
+            >
+              <svg className={`w-4 h-4 ${canExtract ? "text-amber-300 animate-spin" : "text-slate-300"}`} fill="currentColor" viewBox="0 0 20 20">
+                <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
+              </svg>
+              <span>✨ AI 요구사항 추출</span>
+            </Button>
+
+            {/* 보조: 수동 추가 버튼 */}
+            <Button
+              variant="secondary"
+              onClick={() => startEdit(true)}
+              disabled={!document || busy || editing}
+              className="flex items-center gap-1.5"
+              title="원문을 선택하여 직접 수동으로 요구사항을 추가합니다"
+            >
+              <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              <span>요구사항 직접 추가</span>
+            </Button>
+          </div>
+
+          {/* 현재 추천 액션 가이드 텍스트 */}
+          <div className="text-xs text-slate-500 self-center">
+            {blocks.length === 0 && (
+              <span className="text-blue-600 font-medium">👉 먼저 [문서 파싱 시작]을 클릭하세요.</span>
+            )}
+            {blocks.length > 0 && reqs.length === 0 && !warningAccepted && (
+              <span className="text-amber-700 font-medium">👉 아래 경고 확인 체크박스를 선택하면 AI 추출이 활성화됩니다.</span>
+            )}
+            {blocks.length > 0 && reqs.length === 0 && warningAccepted && (
+              <span className="text-indigo-600 font-medium animate-pulse">👉 준비 완료: [✨ AI 요구사항 추출]을 클릭하세요!</span>
+            )}
+            {reqs.length > 0 && (
+              <span className="text-emerald-700 font-medium">✓ 요구사항을 검토·확정한 후 우측 상단 '검증 결과로 이동'을 누르세요.</span>
+            )}
+          </div>
+        </div>
+      </div>
     {document && blocks.length > 0 && <p className="text-sm text-slate-600">원문 {blocks.length}개 블록을 읽었습니다. {document.parse_status === 'partial' ? '일부 항목은 원문 확인이 필요합니다.' : '문서 읽기를 마쳤습니다.'}</p>}
     {reqs.length > 0 && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">저장된 요구사항 {reqs.length}개 · 수락 조건 {reqs.reduce((sum, r) => sum + r.conditions.length, 0)}개. 원문과 비교한 뒤 검토를 확정하세요.</p>}
     {document?.parser_version && document.parser_version !== 'pdf-layout-2' && <p className="text-sm text-amber-800">이전 OCR 결과입니다. 한국어 OCR 설정을 적용한 뒤 ‘문서 다시 파싱’을 눌러주세요. 저장된 요구사항이 있다면 새 문서로 등록해야 합니다.</p>}
@@ -197,6 +399,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
           <div className="flex gap-2"><Button onClick={() => startEdit(false)} disabled={busy}>요구사항 편집</Button><Button onClick={approve} disabled={busy || selected.review_status==='approved'}>검토 확정</Button></div>
         </div> : <p className="text-sm text-slate-500">문서를 파싱한 뒤 원문을 선택해 수동 등록할 수 있습니다. 서버 모델 연결과 파싱 경고를 확인하면 AI 요구사항을 추출할 수 있습니다.</p>}
       </Card>
+      </div>
     </div>
-  </div>;
+  );
 };

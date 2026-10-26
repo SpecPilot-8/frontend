@@ -5,6 +5,7 @@ import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } fro
 import { Button, Card, PageHeader } from '../components/common';
 import { VerificationDetail } from '../components/verification/VerificationDetail';
 import { VerificationScopeDialog } from '../components/verification/VerificationScopeDialog';
+import { VerificationLoadingModal } from '../components/verification/VerificationLoadingModal';
 import type { ScopeOptions, VerificationScope } from '../components/verification/VerificationScopeDialog';
 
 interface Run { id: string; created_at: string; snapshot_id: string; status: string }
@@ -26,6 +27,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [activeJob, setActiveJob] = useState('');
+  const [verifyProgress, setVerifyProgress] = useState<{ completed: number; total: number; stage?: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [scopeOptions, setScopeOptions] = useState<ScopeOptions | null>(null);
   const [pendingInput, setPendingInput] = useState<RunInput | null>(null);
@@ -58,6 +60,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
         const done = await pollJobStatus(projectId, activeJob, job => {
           if (!active) return;
           const progress = job.progress;
+          setVerifyProgress(progress || null);
           setMessage(progress ? `${stages[progress.stage] || progress.stage} · 요구사항 ${progress.completed}/${progress.total}` : '코드 검증 대기 중');
           const stamp = JSON.stringify(progress);
           if (stamp !== lastProgress) { lastProgress = stamp; setRefresh(n => n + 1); }
@@ -67,7 +70,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
         setMessage(done.status === 'completed' ? '조건별 코드 판정을 완료했습니다. 추적표와 원문·코드 근거를 확인하세요. 실제 실행 테스트 결과와는 구분됩니다.'
           : done.error?.message || done.missing_features?.map(f => f.message).join(' / ') || `검증 상태: ${done.status}`);
       } catch (e) { if (active) setMessage(errorMessage(e)); }
-      finally { if (active) { setBusy(false); setActiveJob(''); } }
+      finally { if (active) { setBusy(false); setActiveJob(''); setVerifyProgress(null); } }
     });
     return () => { active = false; };
   }, [activeJob, projectId, load]);
@@ -114,6 +117,11 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   if (selected) return <VerificationDetail requirementId={selected.requirement_id} requirementRevision={selected.requirement_revision} runId={runId} onBack={() => setSelected(null)} onNavigateStep={onNavigateStep} onSelectForTest={() => onSelectRequirementForTest?.(selected.requirement_id)} />;
   const run = runs.find(r => r.id === runId);
   return <div className="max-w-7xl mx-auto space-y-5">
+    <VerificationLoadingModal
+      isOpen={!!activeJob}
+      progress={verifyProgress}
+      stageText={verifyProgress?.stage ? stages[verifyProgress.stage] || verifyProgress.stage : undefined}
+    />
     <PageHeader stepTag="03 / VERIFICATION" title="검증 결과" description="선택한 실행의 요구사항 개정·코드 스냅샷을 기준으로 판정과 근거를 확인합니다." />
     {message && <p role="status" className="p-3 bg-blue-50 rounded text-sm">{message}</p>}
     {scopeOptions && <VerificationScopeDialog options={scopeOptions} busy={busy} onCancel={() => { setScopeOptions(null); setPendingInput(null); setMessage('검증 설정을 취소했습니다. 모델을 호출하지 않았습니다.'); }} onRun={start} />}

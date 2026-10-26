@@ -203,24 +203,20 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     return reqs.filter(r => `${r.title} ${groupName(r)}`.includes(search));
   }, [reqs, search, groupName]);
 
-  const visibleUnapprovedReqs = useMemo(() => {
-    return visibleReqs.filter(r => r.review_status !== 'approved');
-  }, [visibleReqs]);
-
-  const isAllChecked = visibleUnapprovedReqs.length > 0 && visibleUnapprovedReqs.every(r => checkedReqIds.has(r.id));
+  const isAllChecked = visibleReqs.length > 0 && visibleReqs.every(r => checkedReqIds.has(r.id));
   const checkedCount = checkedReqIds.size;
 
   const toggleCheckAll = () => {
     if (isAllChecked) {
       setCheckedReqIds(prev => {
         const next = new Set(prev);
-        visibleUnapprovedReqs.forEach(r => next.delete(r.id));
+        visibleReqs.forEach(r => next.delete(r.id));
         return next;
       });
     } else {
       setCheckedReqIds(prev => {
         const next = new Set(prev);
-        visibleUnapprovedReqs.forEach(r => next.add(r.id));
+        visibleReqs.forEach(r => next.add(r.id));
         return next;
       });
     }
@@ -238,7 +234,11 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   const approveSelected = async () => {
     const targetReqs = reqs.filter(r => checkedReqIds.has(r.id) && r.review_status !== 'approved');
     if (!targetReqs.length || editing || busy) {
-      alert('검토 확정할 미확정 요구사항을 체크박스로 선택해 주세요.');
+      if (checkedReqIds.size > 0) {
+        alert('선택하신 요구사항들은 이미 모두 검토 확정되어 있습니다.');
+      } else {
+        alert('검토 확정할 요구사항을 체크박스로 선택해 주세요.');
+      }
       return;
     }
     if (!window.confirm(`선택한 요구사항 ${targetReqs.length}개를 모두 검토 확정하시겠습니까?`)) return;
@@ -604,13 +604,13 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
                 aria-label="요구사항 전체 선택"
                 checked={isAllChecked}
                 onChange={toggleCheckAll}
-                disabled={busy || editing || visibleUnapprovedReqs.length === 0}
+                disabled={busy || editing || visibleReqs.length === 0}
                 className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
               />
               <span className="font-semibold">
                 전체 선택
                 <span className="ml-1 text-slate-500 font-normal">
-                  ({checkedCount > 0 ? `${checkedCount}개 선택됨` : `미확정 ${visibleUnapprovedReqs.length}개`})
+                  ({checkedCount > 0 ? `${checkedCount} / ${visibleReqs.length}개 선택됨` : `전체 ${visibleReqs.length}개`})
                 </span>
               </span>
             </label>

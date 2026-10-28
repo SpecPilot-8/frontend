@@ -54,6 +54,19 @@ export const fetchRecentProjects = async (): Promise<RecentProject[]> => {
   }
 };
 
+export const deleteProject = async (projectId: string): Promise<void> => {
+  const res = await fetch(`${BASE_URL}/projects/${encodeURIComponent(projectId)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new APIError(
+      errorData.error?.message || `프로젝트 삭제에 실패했습니다. (${res.status})`,
+      errorData.error,
+    );
+  }
+};
+
 export const fetchAIModels = async (): Promise<AIModelOption[]> => {
   try {
     const res = await fetch(`${BASE_URL}/model-profiles`);

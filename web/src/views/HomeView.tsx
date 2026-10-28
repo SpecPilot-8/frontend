@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
-import type { RecentProject, StepId } from '../types';
-import { fetchRecentProjects } from '../services/api';
-import { useProject } from '../contexts/ProjectContext';
-import { Button, Card, StatusBadge, EmptyState } from '../components/common';
+import React, { useEffect, useState } from "react";
+import type { RecentProject, StepId } from "../types";
+import { deleteProject, fetchRecentProjects } from "../services/api";
+import { useProject } from "../contexts/ProjectContext";
+import { Button, Card, StatusBadge, EmptyState } from "../components/common";
 
 interface HomeViewProps {
   onSelectProject: (projectId: string) => void;
@@ -13,7 +13,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   onSelectProject,
   onNavigateStep,
 }) => {
-  const { setProjectId } = useProject();
+  const { projectId, setProjectId } = useProject();
 
   const [projects, setProjects] = useState<RecentProject[]>([]);
   const [error, setError] = useState("");
@@ -34,7 +34,23 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   const handleStartNewSetup = () => {
     setProjectId(null);
-    onNavigateStep('SETUP');
+    onNavigateStep("SETUP");
+  };
+
+  const handleDeleteProject = async (id: string) => {
+    const confirmed = window.confirm(
+      "정말로 이 프로젝트를 삭제하시겠습니까?\n삭제한 프로젝트는 복구할 수 없습니다.",
+    );
+    if (!confirmed) return;
+
+    setError("");
+    try {
+      await deleteProject(id);
+      if (projectId === id) setProjectId(null);
+      loadProjects();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "프로젝트 삭제에 실패했습니다.");
+    }
   };
 
   const handleOpenProject = (id: string) => {
@@ -53,7 +69,8 @@ export const HomeView: React.FC<HomeViewProps> = ({
             요구사항과 코드의 정합성을 검증하세요
           </h1>
           <p className="mt-1 text-sm text-neutral-500">
-            명세서 분석부터 소스코드 AST 검증, QA 테스트 사양서 자동 생성까지 한 번에 진행합니다.
+            명세서 분석부터 소스코드 AST 검증, QA 테스트 사양서 자동 생성까지
+            한번에 진행합니다.
           </p>
         </div>
         <Button
@@ -65,7 +82,11 @@ export const HomeView: React.FC<HomeViewProps> = ({
         </Button>
       </div>
 
-      {error && <p role="alert" className="text-red-600">{error}</p>}
+      {error && (
+        <p role="alert" className="text-red-600">
+          {error}
+        </p>
+      )}
       <Card
         title="최근 프로젝트"
         description="이전에 분석 및 검증을 진행했던 프로젝트 목록입니다."
@@ -94,7 +115,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
             }
           />
         ) : (
-          <div className="divide-y divide-neutral-100 max-h-[360px] overflow-y-auto pr-2 custom-scrollbar">
+          <div className="divide-y divide-neutral-100 max-h-90 overflow-y-auto pr-2 custom-scrollbar">
             {projects.map((project) => (
               <div
                 key={String(project.id)}
@@ -103,20 +124,26 @@ export const HomeView: React.FC<HomeViewProps> = ({
                 <div className="space-y-1">
                   <div className="flex items-center space-x-2">
                     <span className="text-sm font-semibold text-neutral-800">
-                      {String(project.name || '제목 없음')}
+                      {String(project.name || "제목 없음")}
                     </span>
-                    {typeof project.verificationStatus === 'string' &&
-                    project.verificationStatus !== 'not_run' &&
-                    project.verificationStatus !== '' ? (
+                    {typeof project.verificationStatus === "string" &&
+                    project.verificationStatus !== "not_run" &&
+                    project.verificationStatus !== "" ? (
                       <StatusBadge status={project.verificationStatus} />
                     ) : null}
                   </div>
-                  
+
                   {project.techStack || project.lastOpened ? (
                     <div className="flex items-center space-x-2 text-xs text-neutral-400">
-                      {project.techStack ? <span>{String(project.techStack)}</span> : null}
-                      {project.techStack && project.lastOpened ? <span>·</span> : null}
-                      {project.lastOpened ? <span>마지막 작업: {String(project.lastOpened)}</span> : null}
+                      {project.techStack ? (
+                        <span>{String(project.techStack)}</span>
+                      ) : null}
+                      {project.techStack && project.lastOpened ? (
+                        <span>·</span>
+                      ) : null}
+                      {project.lastOpened ? (
+                        <span>마지막 작업: {String(project.lastOpened)}</span>
+                      ) : null}
                     </div>
                   ) : null}
                 </div>
@@ -129,7 +156,14 @@ export const HomeView: React.FC<HomeViewProps> = ({
                   >
                     열기
                   </Button>
-
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-red-600! border-red-200! hover:bg-red-50! hover:border-red-300!"
+                    onClick={() => handleDeleteProject(String(project.id))}
+                  >
+                    삭제
+                  </Button>
                 </div>
               </div>
             ))}

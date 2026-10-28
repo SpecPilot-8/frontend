@@ -134,7 +134,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
             <span>←</span> 검증 결과 목록
           </button>
           <div className="h-4 w-px bg-slate-200"></div>
-          <h2 className="min-w-0 text-lg font-bold text-slate-900 [overflow-wrap:anywhere]">
+          <h2 className="min-w-0 text-lg font-bold text-slate-900 wrap-anywhere">
             {requirement.stable_key} · 검증 상세
           </h2>
         </div>
@@ -178,7 +178,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                       <React.Fragment key={node.id}>
                         <button
                           onClick={() => { setOpenEvidenceIds(new Set(node.evidence_ids || [])); setTimeout(() => document.getElementById(`evidence-${node.evidence_ids?.[0]}`)?.scrollIntoView({block:"nearest"}), 0); }}
-                          className={"min-w-0 text-left [overflow-wrap:anywhere] " + (
+                          className={"min-w-0 text-left wrap-anywhere " + (
                             node.evidence_ids?.some(id => verificationData.evidence?.some(ev => ev.id === id && ev.role === 'problem'))
                               ? "font-bold text-red-500"
                               : ""
@@ -194,8 +194,8 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
               </div>
             )}
 
-          {verificationData.call_flow?.edges?.length ? <div className="text-xs text-slate-500 mb-3 space-y-1 [overflow-wrap:anywhere]">{verificationData.call_flow.edges.map((edge, index) => <p key={index}>{verificationData.call_flow?.nodes?.find(n => n.id === edge.from)?.label} → {verificationData.call_flow?.nodes?.find(n => n.id === edge.to)?.label}</p>)}</div> : null}
-          {verificationData.call_flow?.unresolved?.map((warning, index) => <p className="text-xs text-amber-700 mb-3 [overflow-wrap:anywhere]" key={index}>{warning}</p>)}
+          {verificationData.call_flow?.edges?.length ? <div className="text-xs text-slate-500 mb-3 space-y-1 wrap-anywhere">{verificationData.call_flow.edges.map((edge, index) => <p key={index}>{verificationData.call_flow?.nodes?.find(n => n.id === edge.from)?.label} → {verificationData.call_flow?.nodes?.find(n => n.id === edge.to)?.label}</p>)}</div> : null}
+          {verificationData.call_flow?.unresolved?.map((warning, index) => <p className="text-xs text-amber-700 mb-3 wrap-anywhere" key={index}>{warning}</p>)}
 
           {(!verificationData.evidence ||
             verificationData.evidence.length === 0) && (
@@ -223,11 +223,11 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                     className={`w-full min-w-0 px-4 py-3 flex justify-between items-start gap-3 text-left transition-colors ${isOpen ? (isProblem ? "bg-red-50" : "bg-blue-50") : "bg-white hover:bg-slate-50"}`}
                   >
                     <div className="min-w-0 flex-1 space-y-1">
-                      <span className="block text-sm font-bold text-slate-800 [overflow-wrap:anywhere]">
+                      <span className="block text-sm font-bold text-slate-800 wrap-anywhere">
                         {ev.file_path.split('/').pop()}
                         <span className="ml-2 inline-block whitespace-nowrap text-xs font-medium text-slate-500">L{ev.start_line}–{ev.end_line}</span>
                       </span>
-                      <span className="block text-[11px] text-slate-500 [overflow-wrap:anywhere]">
+                      <span className="block text-[11px] text-slate-500 wrap-anywhere">
                         {ev.file_path}
                       </span>
                       <span className="block truncate text-xs text-slate-500" title={ev.explanation}>
@@ -298,7 +298,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                         </div>
                       </div>
 
-                      <p className="text-[13px] text-slate-600 mb-4 whitespace-pre-wrap [overflow-wrap:anywhere]">
+                      <p className="text-[13px] text-slate-600 mb-4 whitespace-pre-wrap wrap-anywhere">
                         {ev.explanation}
                       </p>
 

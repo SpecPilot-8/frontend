@@ -466,7 +466,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
               disabled={!canExtract}
               className={`flex items-center gap-1.5 shadow-sm border-transparent transition-all ${
                 canExtract
-                  ? "bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold ring-2 ring-indigo-300 ring-offset-1"
+                  ? "bg-linear-to-r from-blue-600 via-indigo-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold ring-2 ring-indigo-300 ring-offset-1"
                   : ""
               }`}
               title={
@@ -623,7 +623,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
           </div>
         )}
 
-        <div className="mt-2 space-y-2 max-h-[500px] overflow-y-auto">
+        <div className="mt-2 space-y-2 max-h-125 overflow-y-auto">
           {visibleReqs.map(r => {
             const isApproved = r.review_status === 'approved';
             const isChecked = checkedReqIds.has(r.id);
@@ -652,7 +652,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
                 />
                 <div className="flex-1 min-w-0">
                   <small className="block text-slate-500 truncate">{groupName(r)}</small>
-                  <div className="font-medium text-slate-900 leading-snug break-words">{r.title}</div>
+                  <div className="font-medium text-slate-900 leading-snug wrap-break-word">{r.title}</div>
                   <small className={`inline-block font-semibold mt-1 px-1.5 py-0.2 rounded text-[11px] ${
                     isApproved
                       ? 'text-emerald-700 bg-emerald-50 border border-emerald-200'

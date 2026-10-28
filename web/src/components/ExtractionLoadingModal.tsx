@@ -30,7 +30,7 @@ export const ExtractionLoadingModal: React.FC<ExtractionLoadingModalProps> = ({
         <div className="relative flex items-center justify-center w-20 h-20">
           <div className="absolute inset-0 rounded-full bg-blue-100 animate-ping opacity-30" />
           <div className="absolute inset-1 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
-          <div className="w-14 h-14 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
+          <div className="w-14 h-14 rounded-full bg-linear-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white shadow-lg shadow-blue-500/30">
             <svg
               className="w-7 h-7 animate-pulse"
               fill="none"
@@ -74,7 +74,7 @@ export const ExtractionLoadingModal: React.FC<ExtractionLoadingModalProps> = ({
           <div className="w-full bg-slate-200/80 h-2.5 rounded-full overflow-hidden">
             {hasProgress ? (
               <div
-                className="bg-gradient-to-r from-blue-600 to-indigo-600 h-full rounded-full transition-all duration-300 ease-out shadow-sm"
+                className="bg-linear-to-r from-blue-600 to-indigo-600 h-full rounded-full transition-all duration-300 ease-out shadow-sm"
                 style={{ width: `${percent}%` }}
               />
             ) : (

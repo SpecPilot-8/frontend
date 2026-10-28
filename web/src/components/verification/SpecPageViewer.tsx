@@ -92,7 +92,7 @@ export const SpecPageViewer: React.FC<SpecPageViewerProps> = ({ fileUrl, page, b
           {fit ? "요구사항 위치 확대" : "전체 페이지 보기"}
         </button>
       </div>
-      <div ref={frameRef} className="relative w-full h-[360px] overflow-auto border border-slate-200 rounded bg-slate-50">
+      <div ref={frameRef} className="relative w-full h-90 overflow-auto border border-slate-200 rounded bg-slate-50">
         <div className="relative inline-block">
           <canvas ref={canvasRef} className="block" />
           {bbox && scale > 0 && (

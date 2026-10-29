@@ -21,7 +21,28 @@ export function activate(context: vscode.ExtensionContext) {
         },
       );
 
-      panel.webview.html = getWebviewContent(context, panel.webview);
+      const isDev = true;
+
+      if (isDev) {
+        panel.webview.html = `
+          <!DOCTYPE html>
+          <html lang="ko">
+          <head>
+              <meta charset="UTF-8">
+              <meta name="viewport" content="width=device-width, initial-scale=1.0">
+              <style>
+                  body, html { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #1e1e1e; }
+                  iframe { width: 100%; height: 100%; border: none; }
+              </style>
+          </head>
+          <body>
+              <iframe src="http://localhost:5173/"></iframe>
+          </body>
+          </html>
+        `;
+      } else {
+        panel.webview.html = getWebviewContent(context, panel.webview);
+      }
 
       panel.webview.onDidReceiveMessage(
         (message) => {

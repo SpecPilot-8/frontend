@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveTestEvidence, evidenceSources } from '../src/services/testEvidence.ts';
+import { resolveTestEvidence, evidenceSources, currentDesign } from '../src/services/testEvidence.ts';
 
 const source = { block_id: 'paragraph', quote: '제목은 50자까지', location: { index: 8 } };
 const requirement = { id: 'requirement', revision: 2, original_text: '제목은 50자까지', source_refs: [source],
@@ -34,4 +34,10 @@ test('조건별 인용과 요구사항 인용의 범위 및 쪽수를 구분한�
   assert.equal(fallback.kind, 'requirement');
   assert.equal(fallback.refs[0].location.index, 8);
   assert.deepEqual(evidenceSources({}, { ...requirement, source_refs: [] }).refs, []);
+});
+
+test('기존 사양서에 사유를 만들지 않고 편집 후 생성 설명을 현재 근거로 취급하지 않는다', () => {
+  assert.equal(currentDesign({revision: 1}), false);
+  assert.equal(currentDesign({revision: 1, design: {generated_revision: 1}}), true);
+  assert.equal(currentDesign({revision: 2, design: {generated_revision: 1}}), false);
 });

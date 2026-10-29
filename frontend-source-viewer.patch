@@ -1,0 +1,553 @@
+diff --git a/web/src/components/common/pdf.ts b/web/src/components/common/pdf.ts
+new file mode 100644
+index 0000000..34a705a
+--- /dev/null
++++ b/web/src/components/common/pdf.ts
+@@ -0,0 +1,117 @@
++import * as pdfjs from "pdfjs-dist";
++import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
++
++pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
++
++// 한글 CID 폰트는 CMap 없이는 pdf.js가 글자를 해석하지 못해 텍스트 레이어가 비고,
++// 인용문 위치를 하나도 찾을 수 없다. VS Code webview(base: "./")에서는 cMapUrl 같은
++// 고정 경로가 깨지므로 CMap을 번들 자산으로 넣고 pdf.js에 직접 공급한다.
++const cmapUrls = import.meta.glob("/node_modules/pdfjs-dist/cmaps/*.bcmap", {
++  query: "?url",
++  import: "default",
++  eager: true,
++}) as Record<string, string>;
++const cmapByName = new Map(
++  Object.entries(cmapUrls).map(([path, url]) => [path.slice(path.lastIndexOf("/") + 1, -".bcmap".length), url]),
++);
++
++class BundledCMapReaderFactory {
++  async fetch({ name }: { name: string }) {
++    const url = cmapByName.get(name);
++    if (!url) throw new Error(`CMap ${name}을 찾을 수 없습니다`);
++    const res = await fetch(url);
++    if (!res.ok) throw new Error(`CMap ${name}을 불러오지 못했습니다`);
++    return { cMapData: new Uint8Array(await res.arrayBuffer()), isCompressed: true };
++  }
++}
++
++// 같은 문서를 요구사항마다 다시 받지 않는다
++const documents = new Map<string, Promise<pdfjs.PDFDocumentProxy>>();
++export const loadDocument = (url: string) => {
++  if (!documents.has(url)) {
++    const task = pdfjs.getDocument({
++      url,
++      CMapReaderFactory: BundledCMapReaderFactory,
++      useWorkerFetch: false,
++    }).promise;
++    task.catch(() => documents.delete(url));
++    documents.set(url, task);
++  }
++  return documents.get(url)!;
++};
++
++/** [x, y, w, h], PDF pt, 페이지 왼쪽 위 원점 (백엔드 블록 location.bbox와 같은 좌표계) */
++export type PdfRect = [number, number, number, number];
++
++type TextItem = { str: string; transform: number[]; width: number };
++type Glyph = { c: string; x0: number; x1: number; top: number; bottom: number; line: number };
++
++const mul = (m: number[], n: number[]) => [
++  m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1],
++  m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3],
++  m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5],
++];
++
++/** 텍스트 항목을 글자 단위로 펼친다. pdf.js는 글자별 폭을 주지 않으므로 항목 폭을 글자 수로 나눈다. */
++function toGlyphs(items: TextItem[], viewportTransform: number[]): Glyph[] {
++  const glyphs: Glyph[] = [];
++  const lines: { base: number; size: number }[] = [];
++  for (const it of items) {
++    if (!it.str?.trim()) continue;
++    const t = mul(viewportTransform, it.transform);
++    const size = Math.hypot(t[2], t[3]);
++    const base = t[5];
++    const chars = Array.from(it.str.normalize("NFC"));
++    const step = it.width / chars.length;
++    let line = lines.findIndex((l) => Math.abs(l.base - base) < Math.max(l.size, size) * 0.5);
++    if (line < 0) {
++      lines.push({ base, size });
++      line = lines.length - 1;
++    }
++    chars.forEach((c, i) => {
++      if (!c.trim()) return;
++      const x0 = t[4] + step * i;
++      glyphs.push({ c, x0, x1: x0 + step, top: base - size * 0.9, bottom: base + size * 0.25, line });
++    });
++  }
++  return glyphs;
++}
++
++/**
++ * 인용문(quote)이 블록(bbox) 안에서 차지하는 줄별 사각형. 못 찾으면 null.
++ *
++ * 기획서 PDF는 한글 공백이 빠진 채 글자 간격으로만 띄어 쓰는 경우가 많아, 백엔드가 공백을
++ * 복원한 블록 텍스트와 PDF 텍스트의 공백이 다르다. 공백을 모두 지운 문자열끼리 비교한다.
++ * OCR로 읽은 헤더처럼 PDF에 글자가 없는 블록은 null → 호출 측에서 블록 전체로 표시한다.
++ */
++export function quoteRects(items: TextItem[], viewportTransform: number[], bbox: PdfRect, quote: string): PdfRect[] | null {
++  const needle = quote.normalize("NFC").replace(/\s+/g, "");
++  if (!needle) return null;
++  const [bx, by, bw, bh] = bbox;
++  const M = 2;
++  const glyphs = toGlyphs(items, viewportTransform).filter((g) => {
++    const cx = (g.x0 + g.x1) / 2;
++    const cy = (g.top + g.bottom) / 2;
++    return cx >= bx - M && cx <= bx + bw + M && cy >= by - M && cy <= by + bh + M;
++  });
++  const lineTop = new Map<number, number>();
++  glyphs.forEach((g) => lineTop.set(g.line, Math.min(lineTop.get(g.line) ?? Infinity, g.top)));
++  glyphs.sort((a, b) => lineTop.get(a.line)! - lineTop.get(b.line)! || a.line - b.line || a.x0 - b.x0);
++
++  const start = glyphs.map((g) => g.c).join("").indexOf(needle);
++  if (start < 0) return null;
++  const owners = glyphs.flatMap((g, i) => Array.from(g.c, () => i));
++  const byLine = new Map<number, PdfRect>();
++  for (const i of new Set(owners.slice(start, start + needle.length))) {
++    const g = glyphs[i];
++    const r = byLine.get(g.line);
++    if (!r) {
++      byLine.set(g.line, [g.x0, g.top, g.x1 - g.x0, g.bottom - g.top]);
++      continue;
++    }
++    const x0 = Math.min(r[0], g.x0);
++    const y0 = Math.min(r[1], g.top);
++    byLine.set(g.line, [x0, y0, Math.max(r[0] + r[2], g.x1) - x0, Math.max(r[1] + r[3], g.bottom) - y0]);
++  }
++  return [...byLine.values()].sort((a, b) => a[1] - b[1] || a[0] - b[0]);
++}
+diff --git a/web/src/components/verification/RequirementPanel.tsx b/web/src/components/verification/RequirementPanel.tsx
+index e547057..3a3f42c 100644
+--- a/web/src/components/verification/RequirementPanel.tsx
++++ b/web/src/components/verification/RequirementPanel.tsx
+@@ -69,7 +69,7 @@ export const RequirementPanel: React.FC<RequirementPanelProps> = ({ projectId, r
+           </p>
+         </div>
+ 
+-        {requirement.document_id && pageIndex > 0 && <section className="border-t border-slate-100 pt-4"><h4 className="text-sm font-bold mb-2">기획서 원본 · {pageIndex}쪽</h4><SpecPageViewer fileUrl={`${BASE_URL}/projects/${projectId}/documents/${requirement.document_id}/file`} page={pageIndex} bbox={bbox} /></section>}
++        {requirement.document_id && pageIndex > 0 && <section className="border-t border-slate-100 pt-4"><h4 className="text-sm font-bold mb-2">기획서 원본 · {pageIndex}쪽</h4><SpecPageViewer fileUrl={`${BASE_URL}/projects/${projectId}/documents/${requirement.document_id}/file`} page={pageIndex} marks={(requirement.source_refs || []).flatMap((r, i) => r.location?.index === pageIndex && r.location.bbox ? [{ key: `ref:${i}`, bbox: r.location.bbox, quote: r.quote, tone: 'other' as const, title: '요구사항 원문' }] : [])} /></section>}
+ 
+         {primaryRef && (<div className="border-t border-slate-100 pt-6">
+             <h4 className="text-sm font-bold text-slate-900 mb-3">
+diff --git a/web/src/components/verification/SpecPageViewer.tsx b/web/src/components/verification/SpecPageViewer.tsx
+index 8b1b4c2..b55d105 100644
+--- a/web/src/components/verification/SpecPageViewer.tsx
++++ b/web/src/components/verification/SpecPageViewer.tsx
+@@ -1,38 +1,76 @@
+-import React, { useEffect, useRef, useState } from "react";
+-import * as pdfjs from "pdfjs-dist";
+-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
++import React, { useEffect, useMemo, useRef, useState } from "react";
++import type * as pdfjs from "pdfjs-dist";
++import { loadDocument, quoteRects, type PdfRect } from "../common/pdf";
+ 
+-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
++/** 페이지 위에 표시할 출처 하나 */
++export interface SpecMark {
++  key: string;
++  // 같은 조건의 출처처럼 함께 강조할 묶음. 없으면 key
++  group?: string;
++  // [x, y, w, h], PDF 좌표(pt, 왼쪽 위 기준). 파서가 찾은 원문 블록(표 한 행) 위치
++  bbox: number[];
++  // 블록 안에서 실제로 인용한 문장. 있으면 그 문장만 칠하고, 못 찾으면 블록 전체를 점선으로 칠한다
++  quote?: string;
++  tone?: "description" | "action" | "unmapped" | "other";
++  // 표 번호 (Description 0·1·2 / Action A·B)
++  label?: string | null;
++  // OCR로 읽은 블록처럼 원문 대조가 필요한 출처
++  uncertain?: boolean;
++  title?: string;
++}
+ 
+ interface SpecPageViewerProps {
+   // 백엔드 GET /documents/{d}/file
+   fileUrl: string;
+   // 1부터 센다 (v2 블록 location.index)
+   page: number;
+-  // [x, y, w, h], PDF 좌표(pt, 왼쪽 위 기준). 파서가 찾은 요구사항 행 위치
++  // 출처 하나만 표시하던 기존 방식. marks가 있으면 무시한다
+   bbox?: number[];
++  marks?: SpecMark[];
++  // 진하게 표시하고 확대 시 가운데로 스크롤할 출처(group 또는 key). 없으면 첫 출처
++  activeKey?: string | null;
++  onMarkClick?: (mark: SpecMark) => void;
+ }
+ 
+ // 화면설계서 한 페이지를 패널 폭에 다 맞추면 글자를 읽을 수 없어서 기본은 확대해서 요구사항 위치로 스크롤한다
+ const ZOOM = 3;
+ 
+-// 같은 문서를 요구사항마다 다시 받지 않는다
+-const documents = new Map<string, Promise<pdfjs.PDFDocumentProxy>>();
+-const loadDocument = (url: string) => {
+-  if (!documents.has(url)) {
+-    const task = pdfjs.getDocument(url).promise;
+-    task.catch(() => documents.delete(url));
+-    documents.set(url, task);
+-  }
+-  return documents.get(url)!;
++const TONES: Record<NonNullable<SpecMark["tone"]>, { box: string; badge: string }> = {
++  description: { box: "border-blue-500 bg-blue-400/20", badge: "bg-blue-600" },
++  action: { box: "border-orange-500 bg-orange-400/20", badge: "bg-orange-600" },
++  other: { box: "border-amber-500 bg-amber-300/25", badge: "bg-amber-600" },
++  unmapped: { box: "border-slate-400 bg-[repeating-linear-gradient(45deg,rgba(148,163,184,.22)_0_4px,transparent_4px_8px)]", badge: "bg-slate-500" },
+ };
+ 
+-export const SpecPageViewer: React.FC<SpecPageViewerProps> = ({ fileUrl, page, bbox }) => {
++type TextLayer = { source: string; items: { str: string; transform: number[]; width: number }[]; transform: number[] };
++
++export const SpecPageViewer: React.FC<SpecPageViewerProps> = ({ fileUrl, page, bbox, marks, activeKey, onMarkClick }) => {
+   const frameRef = useRef<HTMLDivElement>(null);
+   const canvasRef = useRef<HTMLCanvasElement>(null);
+   const [error, setError] = useState<string | null>(null);
+   const [scale, setScale] = useState(0);
+   const [fit, setFit] = useState(false);
++  const [loaded, setLoaded] = useState<TextLayer | null>(null);
++  // 페이지를 바꾸는 동안 이전 페이지 글자로 위치를 계산하지 않는다
++  const text = loaded?.source === `${fileUrl}#${page}` ? loaded : null;
++
++  const list = useMemo<SpecMark[]>(
++    () => marks ?? (bbox ? [{ key: "source", bbox, tone: "other" }] : []),
++    [marks, bbox],
++  );
++  // 인용문 → 줄별 사각형. 텍스트 레이어에서 못 찾으면 블록 전체를 점선으로 대신 칠한다
++  const shapes = useMemo(
++    () =>
++      list.map((m) => {
++        const found = m.quote && text ? quoteRects(text.items, text.transform, m.bbox as PdfRect, m.quote) : null;
++        return { ...m, rects: found ?? [m.bbox], approximate: Boolean(m.quote && text && !found) };
++      }),
++    [list, text],
++  );
++  const groupOf = (m: SpecMark) => m.group ?? m.key;
++  const focus = shapes.find((s) => groupOf(s) === activeKey) ?? shapes.find((s) => s.tone !== "unmapped");
++  const focusKey = focus?.key;
++  const focusRect = focus?.rects[0];
+ 
+   useEffect(() => {
+     let cancelled = false;
+@@ -43,7 +81,7 @@ export const SpecPageViewer: React.FC<SpecPageViewerProps> = ({ fileUrl, page, b
+ 
+     loadDocument(fileUrl)
+       .then((doc) => doc.getPage(page))
+-      .then((pdfPage) => {
++      .then(async (pdfPage) => {
+         if (cancelled) return;
+         const base = pdfPage.getViewport({ scale: 1 });
+         const width = frame.clientWidth * (fit ? 1 : ZOOM);
+@@ -54,20 +92,13 @@ export const SpecPageViewer: React.FC<SpecPageViewerProps> = ({ fileUrl, page, b
+         canvas.style.width = `${width}px`;
+         canvas.style.height = `${base.height * s}px`;
+         renderTask = pdfPage.render({ canvasContext: canvas.getContext("2d")!, viewport });
+-        return renderTask.promise.then(() => {
+-          if (cancelled) return;
+-          setScale(s);
+-          setError(null);
+-          if (bbox && !fit) {
+-            // 박스가 프레임 가운데 오도록 프레임 안에서만 스크롤한다 (페이지 전체는 움직이지 않는다)
+-            frame.scrollTo({
+-              left: Math.max(0, (bbox[0] + bbox[2] / 2) * s - frame.clientWidth / 2),
+-              top: Math.max(0, (bbox[1] + bbox[3] / 2) * s - frame.clientHeight / 2),
+-            });
+-          } else {
+-            frame.scrollTo({ left: 0, top: 0 });
+-          }
+-        });
++        // scale 1 뷰포트 = 백엔드 bbox와 같은 PDF pt 좌표
++        const content = await pdfPage.getTextContent();
++        await renderTask.promise;
++        if (cancelled) return;
++        setLoaded({ source: `${fileUrl}#${page}`, items: content.items as TextLayer["items"], transform: base.transform });
++        setScale(s);
++        setError(null);
+       })
+       .catch((e: Error) => {
+         if (!cancelled && e?.name !== "RenderingCancelledException") {
+@@ -79,33 +110,103 @@ export const SpecPageViewer: React.FC<SpecPageViewerProps> = ({ fileUrl, page, b
+       cancelled = true;
+       renderTask?.cancel();
+     };
+-  }, [fileUrl, page, bbox, fit]);
++  }, [fileUrl, page, fit]);
++
++  useEffect(() => {
++    const frame = frameRef.current;
++    if (!frame || scale <= 0) return;
++    if (focusRect && !fit) {
++      // 박스가 프레임 가운데 오도록 프레임 안에서만 스크롤한다 (페이지 전체는 움직이지 않는다)
++      const [x, y, w, h] = focusRect;
++      frame.scrollTo({
++        left: Math.max(0, (x + w / 2) * scale - frame.clientWidth / 2),
++        top: Math.max(0, (y + h / 2) * scale - frame.clientHeight / 2),
++        behavior: "smooth",
++      });
++    } else {
++      frame.scrollTo({ left: 0, top: 0 });
++    }
++    // focusRect는 렌더마다 새 배열이라 값이 같으면 다시 스크롤하지 않도록 키와 좌표로 비교한다
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [scale, fit, focusKey, focusRect?.join(",")]);
++
++  const hasActive = activeKey != null && shapes.some((s) => groupOf(s) === activeKey);
++  // 표 번호 배지는 행마다 한 번만, 행 왼쪽 위 바깥에 단다. 인용문마다 달면 글자를 가린다
++  const badges = useMemo(() => {
++    const seen = new Map<string, { id: string; label: string; x: number; y: number; tone: NonNullable<SpecMark["tone"]>; dim: boolean }>();
++    for (const m of shapes) {
++      if (!m.label) continue;
++      const id = m.bbox.join(",");
++      const dim = hasActive && groupOf(m) !== activeKey;
++      const prev = seen.get(id);
++      if (prev) prev.dim = prev.dim && dim;
++      else seen.set(id, { id, label: m.label, x: m.bbox[0], y: m.bbox[1], tone: m.tone ?? "other", dim });
++    }
++    return [...seen.values()];
++  }, [shapes, hasActive, activeKey]);
+ 
+   return (
+     <div className="space-y-2">
+-      <div className="flex justify-end">
++      <div className="flex items-center justify-between gap-2">
++        {marks && marks.length > 0 ? (
++          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500">
++            <span className="inline-flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm border border-blue-500 bg-blue-400/20" />Description</span>
++            <span className="inline-flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm border border-orange-500 bg-orange-400/20" />Action</span>
++            {marks.some((m) => m.tone === "unmapped") && (
++              <span className="inline-flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm border border-dashed border-slate-400" />미연결 행</span>
++            )}
++            <span className="inline-flex items-center gap-1"><i className="w-2.5 h-2.5 rounded-sm border border-dashed border-slate-600" />원문 확인 필요</span>
++          </div>
++        ) : <span />}
+         <button
+           type="button"
+           onClick={() => setFit(!fit)}
+-          className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50"
++          className="text-[11px] px-2 py-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-50 shrink-0"
+         >
+           {fit ? "요구사항 위치 확대" : "전체 페이지 보기"}
+         </button>
+       </div>
+-      <div ref={frameRef} className="relative w-full h-90 overflow-auto border border-slate-200 rounded bg-slate-50">
++      {/* contain: inline-size → 확대한 캔버스 폭이 부모(그리드 칸 등)를 넓히지 않는다.
++          없으면 프레임 폭 × ZOOM으로 캔버스를 그리는 구조라 다시 그릴 때마다 폭이 계속 커진다 */}
++      <div ref={frameRef} style={{ contain: "inline-size" }} className="relative w-full h-90 overflow-auto border border-slate-200 rounded bg-slate-50">
+         <div className="relative inline-block">
+           <canvas ref={canvasRef} className="block" />
+-          {bbox && scale > 0 && (
+-            <div
+-              className="absolute border-2 border-amber-500 bg-amber-300/25 rounded-sm pointer-events-none"
+-              style={{
+-                left: bbox[0] * scale - 3,
+-                top: bbox[1] * scale - 3,
+-                width: bbox[2] * scale + 6,
+-                height: bbox[3] * scale + 6,
+-              }}
+-            />
+-          )}
++          {scale > 0 &&
++            shapes.map((m) => {
++              const tone = TONES[m.tone ?? "other"];
++              const dashed = m.uncertain || m.approximate || m.tone === "unmapped";
++              const active = hasActive && groupOf(m) === activeKey;
++              const dim = hasActive && !active;
++              const clickable = Boolean(onMarkClick);
++              const tip = [m.title, m.quote, dashed && m.tone !== "unmapped" ? "원문 위치 확인 필요" : ""].filter(Boolean).join("\n");
++              return (
++                <React.Fragment key={m.key}>
++                  {m.rects.map(([x, y, w, h], i) => (
++                    <div
++                      key={i}
++                      title={tip || undefined}
++                      onClick={clickable ? () => onMarkClick!(m) : undefined}
++                      className={`absolute border-2 rounded-sm transition-opacity ${tone.box} ${dashed ? "border-dashed" : ""} ${
++                        dim ? "opacity-30" : ""
++                      } ${active ? "ring-2 ring-offset-1 ring-blue-300" : ""} ${clickable ? "cursor-pointer" : "pointer-events-none"}`}
++                      style={{ left: x * scale - 3, top: y * scale - 3, width: w * scale + 6, height: h * scale + 6 }}
++                    />
++                  ))}
++                </React.Fragment>
++              );
++            })}
++          {scale > 0 &&
++            badges.map((b) => (
++              <span
++                key={b.id}
++                className={`absolute -translate-x-full -translate-y-1/2 text-[10px] leading-none font-bold text-white px-1.5 py-0.5 rounded-full pointer-events-none ${TONES[b.tone].badge} ${
++                  b.dim ? "opacity-30" : ""
++                }`}
++                style={{ left: b.x * scale - 6, top: b.y * scale + 6 }}
++              >
++                {b.label}
++              </span>
++            ))}
+         </div>
+         {error && <div className="p-4 text-xs text-slate-500">{error}</div>}
+       </div>
+diff --git a/web/src/views/AnalysisView.tsx b/web/src/views/AnalysisView.tsx
+index 6ef1873..ba53d81 100644
+--- a/web/src/views/AnalysisView.tsx
++++ b/web/src/views/AnalysisView.tsx
+@@ -5,14 +5,16 @@ import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } fro
+ import { ParsingWarnings } from '../components/ParsingWarnings';
+ import { ExtractionLoadingModal } from '../components/ExtractionLoadingModal';
+ import { Button, Card, PageHeader } from '../components/common';
++import { SpecPageViewer, type SpecMark } from '../components/verification/SpecPageViewer';
+ 
+ interface Doc { id: string; filename: string; revision: number; parse_status: string; parser_version?: string; screens?: { page: number; screen_name?: string; screen_id?: string }[]; warnings: { code?: string; message: string }[] }
+-interface Block { id: string; text: string; location: { index: number }; structure: { section: string; label: string | null } }
++interface Block { id: string; text: string; extraction_method?: string; location: { index: number; bbox?: number[] }; structure: { section: string; label: string | null } }
+ interface Group { id: string; title: string; subtopics: { id: string; title: string }[] }
+ interface ExtractionJob { id: string; document_id?: string; operation: string; status: string; progress?: { completed: number; total: number }; result?: { requirement_count: number; condition_count: number }; error?: { message: string }; missing_features: { message: string }[] }
+ type Req = RequirementItem & { review_reasons?: string[]; revision: number; document_id: string; document_revision: number; source_refs: { block_id: string; quote: string }[] };
+ const categoryLabels = { display: '화면 표시', validation: '입력 검사', navigation: '화면 이동', business_logic: '비즈니스 로직', data: '데이터 저장', error_message: '오류 메시지' };
+ const field = 'w-full border border-slate-200 rounded-lg p-2 text-sm bg-white';
++const conditionGroup = (c: Condition) => `cond:${c.id || c.stable_key}`;
+ const blankCondition = (): Condition => ({ stable_key: crypto.randomUUID(), text: '', category: 'business_logic', target: 'unknown', verifiable: 'code', source_refs: [] });
+ 
+ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> = ({ onNavigateStep }) => {
+@@ -39,6 +41,8 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }>
+   const [acknowledgedFor, setAcknowledgedFor] = useState('');
+   const [selectedPageFilter, setSelectedPageFilter] = useState<string>('all');
+   const [checkedReqIds, setCheckedReqIds] = useState<Set<string>>(new Set());
++  // 원문 뷰어: 강조할 출처 묶음('req' 또는 'cond:<조건>')과 보고 있는 쪽. 요구사항을 바꾸면 초기화
++  const [viewer, setViewer] = useState<{ reqId: string; active: string | null; page: number | null }>({ reqId: '', active: null, page: null });
+   const selected = reqs.find(r => r.id === selectedId);
+   const document = docs.find(d => d.id === docId);
+   const source = blocks.find(b => b.id === blockId);
+@@ -306,6 +310,60 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }>
+     const pageNum = Number(selectedPageFilter);
+     return blocks.filter(b => b.location?.index === pageNum);
+   }, [blocks, selectedPageFilter]);
++
++  // ── 원문 뷰어: 선택한 요구사항·조건의 출처를 PDF 위에 표시 ──
++  const blockById = useMemo(() => new Map(blocks.map(b => [b.id, b])), [blocks]);
++  // 이 문서의 어떤 요구사항·조건에도 출처로 쓰이지 않은 행 → 누락 의심
++  const usedBlockIds = useMemo(() => new Set(reqs.flatMap(r => [
++    ...r.source_refs.map(s => s.block_id),
++    ...r.conditions.flatMap(c => (c.source_refs || []).map(s => s.block_id)),
++  ])), [reqs]);
++  const sourceMarks = useMemo(() => {
++    if (!selected) return [];
++    const refs = [
++      ...selected.source_refs.map((ref, i) => ({ ref, group: 'req', key: `req:${i}`, title: '요구사항 원문' })),
++      ...selected.conditions.flatMap(c => (c.source_refs || []).map((ref, i) => ({ ref, group: conditionGroup(c), key: `${conditionGroup(c)}:${i}`, title: c.text }))),
++    ];
++    return refs.flatMap(({ ref, group, key, title }) => {
++      const b = ref.block_id ? blockById.get(ref.block_id) : undefined;
++      if (!b?.location.bbox) return [];
++      const mark: SpecMark = {
++        key, group, title, bbox: b.location.bbox, quote: ref.quote, label: b.structure.label,
++        tone: b.structure.section === 'description' || b.structure.section === 'action' ? b.structure.section : 'other',
++        uncertain: b.extraction_method === 'ocr',
++      };
++      return [{ page: b.location.index, mark }];
++    });
++  }, [selected, blockById]);
++  const sourcePages = useMemo(() => [...new Set(sourceMarks.map(m => m.page))].sort((a, b) => a - b), [sourceMarks]);
++  const viewerActive = viewer.reqId === selectedId ? viewer.active : null;
++  const viewerPage = (viewer.reqId === selectedId && viewer.page) || sourcePages[0] || 0;
++  const unmappedMarks = useMemo<SpecMark[]>(() => blocks
++    .filter(b => b.location.index === viewerPage && b.location.bbox && !usedBlockIds.has(b.id)
++      && (b.structure.section === 'description' || b.structure.section === 'action'))
++    .map(b => ({ key: `unmapped:${b.id}`, bbox: b.location.bbox!, tone: 'unmapped', label: b.structure.label,
++      title: '어떤 요구사항에도 연결되지 않은 행 · 누르면 직접 추가할 출처로 선택합니다' })),
++  [blocks, viewerPage, usedBlockIds]);
++  const pageMarks = useMemo(
++    () => [...unmappedMarks, ...sourceMarks.filter(m => m.page === viewerPage).map(m => m.mark)],
++    [unmappedMarks, sourceMarks, viewerPage],
++  );
++  const uncertainGroups = useMemo(() => new Set(sourceMarks.filter(m => m.mark.uncertain).map(m => m.mark.group)), [sourceMarks]);
++  const focusSource = (group: string | null) => {
++    const page = sourceMarks.find(m => m.mark.group === group)?.page ?? null;
++    setViewer({ reqId: selectedId, active: group, page });
++  };
++  const onMarkClick = (mark: SpecMark) => {
++    if (mark.tone === 'unmapped') {
++      if (editing && !isNew) return;
++      setBlockId(mark.key.slice('unmapped:'.length));
++      setMessage("선택한 행을 '원문 출처 블록'으로 지정했습니다. [요구사항 직접 추가]로 등록할 수 있습니다.");
++      return;
++    }
++    const group = mark.group ?? mark.key;
++    setViewer({ reqId: selectedId, active: viewerActive === group ? null : group, page: viewerPage });
++    window.document.getElementById(`source-${group}`)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
++  };
+   if (!projectId) return <Button onClick={() => onNavigateStep('SETUP')}>프로젝트를 먼저 선택하세요</Button>;
+ 
+   const canExtract = Boolean(
+@@ -526,7 +584,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }>
+       <p>서버 모델로 {document.screens?.length || 0}개 화면의 원문을 순서대로 분석합니다. 화면마다 모델 호출 비용이 발생하며 결과는 검토 전 초안으로 저장합니다.</p>
+       {document.warnings.length > 0 && <label className="flex items-center gap-2"><input type="checkbox" checked={warningAccepted} disabled={busy} onChange={e => setAcknowledgedFor(e.target.checked ? warningKey : '')} />OCR·표 경고와 원문을 확인했으며 이 결과로 요구사항 추출을 진행합니다.</label>}
+     </div>}
+-    <div className="grid xl:grid-cols-[320px_1fr] gap-5">
++    <div className="grid xl:grid-cols-[320px_minmax(0,1fr)] gap-5">
+       <Card title="문서 원문" description={`${blocks.length}개 블록`}>
+         {/* 원문 출처 쪽수 필터 및 카테고리 드롭다운 */}
+         <div className="space-y-3 mb-4 p-3 bg-slate-50/80 rounded-xl border border-slate-200/80">
+@@ -681,11 +739,61 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }>
+           <div className="flex gap-2"><Button type="button" variant="secondary" disabled={busy} onClick={() => setConditions(prev => [...prev,blankCondition()])}>조건 추가</Button><Button type="submit" disabled={busy}>저장</Button><Button type="button" variant="secondary" disabled={busy} onClick={() => {setEditing(false);setUnsavedChanges(false);}}>취소</Button></div>
+         </form> : selected ? <div className="space-y-4">
+           <p className="text-xs font-semibold text-slate-500">{groupName(selected)} · 개정 {selected.revision}</p>
+-          <p className="whitespace-pre-wrap select-text text-sm bg-slate-50 p-3 rounded-lg border border-slate-100">{selected.original_text || '원문 출처 없음: 사용자가 수동 작성한 항목입니다.'}</p>
++          <p
++            id="source-req"
++            onClick={() => sourceMarks.some(m => m.mark.group === 'req') && focusSource(viewerActive === 'req' ? null : 'req')}
++            className={`whitespace-pre-wrap select-text text-sm bg-slate-50 p-3 rounded-lg border ${viewerActive === 'req' ? 'border-blue-400 ring-1 ring-blue-300' : 'border-slate-100'}`}
++          >{selected.original_text || '원문 출처 없음: 사용자가 수동 작성한 항목입니다.'}</p>
++          {sourceMarks.length > 0 && docId && viewerPage > 0 && (
++            <section className="space-y-2">
++              <div className="flex flex-wrap items-center justify-between gap-2">
++                <h4 className="text-xs font-bold text-slate-700">기획서 원본 · {viewerPage}쪽{screenMap[viewerPage] || ''}</h4>
++                {sourcePages.length > 1 && (
++                  <div className="flex gap-1">
++                    {sourcePages.map(p => (
++                      <button key={p} type="button" onClick={() => setViewer({ reqId: selectedId, active: viewerActive, page: p })}
++                        className={`text-[11px] px-2 py-0.5 rounded border ${p === viewerPage ? 'border-blue-400 bg-blue-50 text-blue-700 font-semibold' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
++                        {p}쪽
++                      </button>
++                    ))}
++                  </div>
++                )}
++              </div>
++              <SpecPageViewer
++                fileUrl={`${BASE_URL}${base}/documents/${docId}/file`}
++                page={viewerPage}
++                marks={pageMarks}
++                activeKey={viewerActive}
++                onMarkClick={onMarkClick}
++              />
++              {unmappedMarks.length > 0 && (
++                <p className="text-[11px] text-slate-500">
++                  이 쪽에 어떤 요구사항에도 연결되지 않은 Description·Action 행이 {unmappedMarks.length}개 있습니다. 회색 빗금 행을 누르면 직접 추가할 원문 출처로 선택됩니다.
++                </p>
++              )}
++            </section>
++          )}
+           {selected.review_reasons?.length ? <ul className="text-sm text-amber-800 list-disc pl-5 bg-amber-50/60 p-2.5 rounded-lg border border-amber-100">{selected.review_reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul> : null}
+           <div className="space-y-2">
+             <h4 className="text-xs font-bold text-slate-700">수락 조건 ({selected.conditions.length}개)</h4>
+-            {selected.conditions.map(c => <div key={c.id || c.stable_key} className="border rounded-lg p-3 text-sm bg-white shadow-xs"><small className="text-blue-700 font-semibold">{categoryLabels[c.category]} · {c.target} · {c.verifiable}</small><p className="mt-1 text-slate-800">{c.text}</p></div>)}
++            {selected.conditions.map(c => {
++              const group = conditionGroup(c);
++              const hasSource = sourceMarks.some(m => m.mark.group === group);
++              const isActive = viewerActive === group;
++              return (
++                <div
++                  key={c.id || c.stable_key}
++                  id={`source-${group}`}
++                  onClick={() => hasSource && focusSource(isActive ? null : group)}
++                  className={`border rounded-lg p-3 text-sm bg-white shadow-xs transition-colors ${hasSource ? 'cursor-pointer hover:border-blue-300' : ''} ${isActive ? 'border-blue-400 ring-1 ring-blue-300 bg-blue-50/40' : ''}`}
++                >
++                  <small className="text-blue-700 font-semibold">{categoryLabels[c.category]} · {c.target} · {c.verifiable}</small>
++                  {uncertainGroups.has(group) && <small className="ml-2 text-[10px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded">원문 위치 확인 필요</small>}
++                  {!hasSource && <small className="ml-2 text-[10px] text-slate-400">원문 출처 없음</small>}
++                  <p className="mt-1 text-slate-800">{c.text}</p>
++                </div>
++              );
++            })}
+           </div>
+           <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
+             <Button onClick={() => startEdit(false)} disabled={busy} variant="secondary">요구사항 편집</Button>

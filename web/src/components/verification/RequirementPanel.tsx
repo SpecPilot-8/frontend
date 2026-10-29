@@ -69,7 +69,7 @@ export const RequirementPanel: React.FC<RequirementPanelProps> = ({ projectId, r
           </p>
         </div>
 
-        {requirement.document_id && pageIndex > 0 && <section className="border-t border-slate-100 pt-4"><h4 className="text-sm font-bold mb-2">기획서 원본 · {pageIndex}쪽</h4><SpecPageViewer fileUrl={`${BASE_URL}/projects/${projectId}/documents/${requirement.document_id}/file`} page={pageIndex} bbox={bbox} /></section>}
+        {requirement.document_id && pageIndex > 0 && <section className="border-t border-slate-100 pt-4"><h4 className="text-sm font-bold mb-2">기획서 원본 · {pageIndex}쪽</h4><SpecPageViewer fileUrl={`${BASE_URL}/projects/${projectId}/documents/${requirement.document_id}/file`} page={pageIndex} marks={(requirement.source_refs || []).flatMap((r, i) => r.location?.index === pageIndex && r.location.bbox ? [{ key: `ref:${i}`, bbox: r.location.bbox, quote: r.quote, tone: 'other' as const, title: '요구사항 원문' }] : [])} /></section>}
 
         {primaryRef && (<div className="border-t border-slate-100 pt-6">
             <h4 className="text-sm font-bold text-slate-900 mb-3">

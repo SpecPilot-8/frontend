@@ -5,14 +5,20 @@ import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } fro
 import { ParsingWarnings } from '../components/ParsingWarnings';
 import { ExtractionLoadingModal } from '../components/ExtractionLoadingModal';
 import { Button, Card, PageHeader } from '../components/common';
+import { SpecPageViewer } from '../components/verification/SpecPageViewer';
+import type { PageHighlight } from '../components/verification/SpecPageViewer';
 
 interface Doc { id: string; filename: string; revision: number; parse_status: string; parser_version?: string; screens?: { page: number; screen_name?: string; screen_id?: string }[]; warnings: { code?: string; message: string }[] }
-interface Block { id: string; text: string; location: { index: number }; structure: { section: string; label: string | null } }
+interface Block { id: string; text: string; location: { index: number; bbox?: number[] }; structure: { section: string; label: string | null } }
 interface Group { id: string; title: string; subtopics: { id: string; title: string }[] }
 interface ExtractionJob { id: string; document_id?: string; operation: string; status: string; progress?: { completed: number; total: number }; result?: { requirement_count: number; condition_count: number }; error?: { message: string }; missing_features: { message: string }[] }
 type Req = RequirementItem & { review_reasons?: string[]; revision: number; document_id: string; document_revision: number; source_refs: { block_id: string; quote: string }[] };
 const categoryLabels = { display: '화면 표시', validation: '입력 검사', navigation: '화면 이동', business_logic: '비즈니스 로직', data: '데이터 저장', error_message: '오류 메시지' };
 const field = 'w-full border border-slate-200 rounded-lg p-2 text-sm bg-white';
+type Ref = { block_id?: string; quote?: string; location?: { index?: number; bbox?: number[] } };
+// PDF 미리보기에 띄울 출처 하나. bbox가 없으면 quote로 페이지 텍스트에서 위치를 찾는다
+interface PdfTarget { key: string; page: number; bbox?: number[]; quote?: string; label: string; blockId?: string }
+const blockLabel = (b: Block) => `${b.structure.section}${b.structure.label ? ` [${b.structure.label}]` : ''}`;
 const blankCondition = (): Condition => ({ stable_key: crypto.randomUUID(), text: '', category: 'business_logic', target: 'unknown', verifiable: 'code', source_refs: [] });
 
 export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> = ({ onNavigateStep }) => {
@@ -39,6 +45,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   const [acknowledgedFor, setAcknowledgedFor] = useState('');
   const [selectedPageFilter, setSelectedPageFilter] = useState<string>('all');
   const [checkedReqIds, setCheckedReqIds] = useState<Set<string>>(new Set());
+  const [pdfTarget, setPdfTarget] = useState<PdfTarget | null>(null);
   const selected = reqs.find(r => r.id === selectedId);
   const document = docs.find(d => d.id === docId);
   const source = blocks.find(b => b.id === blockId);
@@ -306,6 +313,58 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     const pageNum = Number(selectedPageFilter);
     return blocks.filter(b => b.location?.index === pageNum);
   }, [blocks, selectedPageFilter]);
+  const blockById = useMemo(() => new Map(blocks.map(b => [b.id, b])), [blocks]);
+  const refTarget = useCallback((ref: Ref, key: string): PdfTarget | null => {
+    const b = ref.block_id ? blockById.get(ref.block_id) : undefined;
+    const page = ref.location?.index || b?.location?.index;
+    if (!page) return null;
+    return { key, page, bbox: ref.location?.bbox || b?.location?.bbox, quote: ref.quote || b?.text, label: b ? blockLabel(b) : '원문 출처', blockId: b?.id };
+  }, [blockById]);
+  const blockTarget = useCallback((b: Block): PdfTarget => ({ key: `block:${b.id}`, page: b.location.index || 1, bbox: b.location.bbox, quote: b.text, label: blockLabel(b), blockId: b.id }), []);
+  // 요구사항 자체의 출처 + 각 수락 조건의 출처
+  const selectedRefs = useMemo(() => {
+    if (!selected) return [] as PdfTarget[];
+    const list: PdfTarget[] = [];
+    selected.source_refs.forEach((r, i) => { const t = refTarget(r, `req:${i}`); if (t) list.push(t); });
+    selected.conditions.forEach(c => (c.source_refs || []).forEach((r, i) => { const t = refTarget(r, `cond:${c.id || c.stable_key}:${i}`); if (t) list.push(t); }));
+    return list;
+  }, [selected, refTarget]);
+  // 직접 고른 출처가 없으면: 편집 중엔 선택한 원문 블록, 아니면 선택한 요구사항의 첫 출처
+  const activeTarget: PdfTarget | null = pdfTarget
+    ?? (editing ? (source ? blockTarget(source) : null) : selectedRefs[0] ?? (source ? blockTarget(source) : null));
+  const pageHighlights: PageHighlight[] = useMemo(() => {
+    if (!activeTarget) return [];
+    const seen = new Set<string>();
+    const list: PageHighlight[] = [];
+    const add = (bbox: number[] | undefined, active: boolean) => {
+      if (!bbox) return;
+      const k = bbox.join(',');
+      if (seen.has(k)) return;
+      seen.add(k); list.push({ bbox, active });
+    };
+    add(activeTarget.bbox, true);
+    if (!editing) selectedRefs.filter(t => t.page === activeTarget.page).forEach(t => add(t.bbox, false));
+    return list;
+  }, [activeTarget, selectedRefs, editing]);
+  const focusTarget = (t: PdfTarget | null) => {
+    setPdfTarget(t);
+    if (t?.blockId && !editing) setBlockId(t.blockId);
+  };
+  const refButton = (t: PdfTarget) => (
+    <button
+      type="button"
+      key={t.key}
+      onClick={() => focusTarget(t)}
+      className={`inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border transition-colors cursor-pointer ${
+        activeTarget?.key === t.key ? 'bg-amber-100 border-amber-400 text-amber-900 font-semibold' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+      }`}
+      title={t.quote}
+    >
+      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a2 2 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+      {t.page}쪽 · {t.label}
+    </button>
+  );
+
   if (!projectId) return <Button onClick={() => onNavigateStep('SETUP')}>프로젝트를 먼저 선택하세요</Button>;
 
   const canExtract = Boolean(
@@ -369,7 +428,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
               className="px-3 py-1.5 text-xs text-slate-800 bg-white border border-slate-200 rounded-lg focus:outline-none focus:border-blue-500 max-w-sm font-medium"
               value={docId}
               disabled={editing || busy}
-              onChange={e => setDocId(e.target.value)}
+              onChange={e => { setDocId(e.target.value); setPdfTarget(null); setBlockId(''); }}
             >
               {docs.map(d => (
                 <option key={d.id} value={d.id}>
@@ -561,7 +620,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
               className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-800 shadow-2xs focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition-colors"
               value={blockId}
               disabled={editing && !isNew}
-              onChange={e => setBlockId(e.target.value)}
+              onChange={e => { setBlockId(e.target.value); const b = blockById.get(e.target.value); setPdfTarget(b ? blockTarget(b) : null); }}
             >
               <option value="">출처를 선택하세요 ({filteredBlocks.length}개 블록)</option>
               {selectedPageFilter === 'all' ? (
@@ -632,7 +691,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
             return (
               <div
                 key={r.id}
-                onClick={() => !editing && !busy && setSelectedId(r.id)}
+                onClick={() => { if (!editing && !busy) { setSelectedId(r.id); setPdfTarget(null); } }}
                 className={`w-full flex items-start gap-2.5 p-3 rounded-lg border text-sm transition-all cursor-pointer ${
                   isSelected
                     ? 'bg-blue-50 border-blue-400 ring-1 ring-blue-400/40'
@@ -667,6 +726,8 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
         </div>
       </Card>
       <Card title={editing ? (isNew ? '요구사항 추가' : '요구사항 편집') : selected?.title || '등록된 요구사항이 없습니다'}>
+        <div className="grid lg:grid-cols-2 gap-5 items-start">
+        <div className="min-w-0">
         {editing ? <form onSubmit={save} className="space-y-3">
           <label className="block">주제<input aria-label="주제" required maxLength={200} className={field} value={topic} onChange={e => setTopic(e.target.value)} /></label>
           <label className="block">소주제<input aria-label="소주제" required maxLength={200} className={field} value={subtopic} onChange={e => setSubtopic(e.target.value)} /></label>
@@ -682,10 +743,14 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
         </form> : selected ? <div className="space-y-4">
           <p className="text-xs font-semibold text-slate-500">{groupName(selected)} · 개정 {selected.revision}</p>
           <p className="whitespace-pre-wrap select-text text-sm bg-slate-50 p-3 rounded-lg border border-slate-100">{selected.original_text || '원문 출처 없음: 사용자가 수동 작성한 항목입니다.'}</p>
+          {selectedRefs.some(t => t.key.startsWith('req:')) && <div className="flex flex-wrap items-center gap-1.5">
+            <span className="text-[11px] font-semibold text-slate-500">원문 위치</span>
+            {selectedRefs.filter(t => t.key.startsWith('req:')).map(refButton)}
+          </div>}
           {selected.review_reasons?.length ? <ul className="text-sm text-amber-800 list-disc pl-5 bg-amber-50/60 p-2.5 rounded-lg border border-amber-100">{selected.review_reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul> : null}
           <div className="space-y-2">
             <h4 className="text-xs font-bold text-slate-700">수락 조건 ({selected.conditions.length}개)</h4>
-            {selected.conditions.map(c => <div key={c.id || c.stable_key} className="border rounded-lg p-3 text-sm bg-white shadow-xs"><small className="text-blue-700 font-semibold">{categoryLabels[c.category]} · {c.target} · {c.verifiable}</small><p className="mt-1 text-slate-800">{c.text}</p></div>)}
+            {selected.conditions.map(c => <div key={c.id || c.stable_key} className="border rounded-lg p-3 text-sm bg-white shadow-xs"><small className="text-blue-700 font-semibold">{categoryLabels[c.category]} · {c.target} · {c.verifiable}</small><p className="mt-1 text-slate-800">{c.text}</p>{(() => { const refs = selectedRefs.filter(t => t.key.startsWith(`cond:${c.id || c.stable_key}:`)); return refs.length ? <div className="flex flex-wrap gap-1.5 mt-2">{refs.map(refButton)}</div> : null; })()}</div>)}
           </div>
           <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
             <Button onClick={() => startEdit(false)} disabled={busy} variant="secondary">요구사항 편집</Button>
@@ -694,6 +759,24 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
             </Button>
           </div>
         </div> : <p className="text-sm text-slate-500">문서를 파싱한 뒤 원문을 선택해 수동 등록할 수 있습니다. 서버 모델 연결과 파싱 경고를 확인하면 AI 요구사항을 추출할 수 있습니다.</p>}
+        </div>
+        <section aria-label="기획서 원본 위치" className="min-w-0 lg:sticky lg:top-0 space-y-2">
+          <h4 className="text-xs font-bold text-slate-700">
+            기획서 원본{activeTarget ? ` · ${activeTarget.page}쪽${screenMap[activeTarget.page] || ''}` : ''}
+          </h4>
+          {activeTarget && document ? <>
+            <p className="text-[11px] text-slate-600 bg-amber-50/70 border border-amber-100 rounded px-2 py-1 line-clamp-3 select-text">
+              <span className="font-semibold text-amber-800">{activeTarget.label}</span>{activeTarget.quote ? ` · ${activeTarget.quote}` : ''}
+            </p>
+            <SpecPageViewer
+              fileUrl={`${BASE_URL}${base}/documents/${docId}/file`}
+              page={activeTarget.page}
+              highlights={pageHighlights}
+              searchText={activeTarget.bbox ? '' : activeTarget.quote || ''}
+            />
+          </> : <p className="text-xs text-slate-500 border border-dashed border-slate-200 rounded-lg p-4">왼쪽에서 원문 블록을 고르거나 요구사항·수락 조건의 출처를 누르면 PDF에서 해당 위치를 표시합니다.</p>}
+        </section>
+        </div>
       </Card>
       </div>
     </div>

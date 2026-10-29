@@ -63,6 +63,7 @@ export interface TestExecution {
 
 export interface TestSpecification {
   id: string;
+  created_at?: string;
   verification_run_id: string;
   revision: number;
   status: string;

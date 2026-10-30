@@ -15,7 +15,8 @@ const field = 'w-full border border-slate-200 rounded-lg p-2 text-sm bg-white';
 const blankCondition = (): Condition => ({ stable_key: crypto.randomUUID(), text: '', category: 'business_logic', target: 'unknown', verifiable: 'code', source_refs: [] });
 
 export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> = ({ onNavigateStep }) => {
-  const { projectId, setUnsavedChanges, saveBeforeLeaveRef } = useProject();
+  const { projectId, setUnsavedChanges, saveBeforeLeaveRef, analysisTarget, setAnalysisTarget } = useProject();
+  const [reviewFocus] = useState(analysisTarget);
   const [docs, setDocs] = useState<Doc[]>([]);
   const [docId, setDocId] = useState('');
   const [blocks, setBlocks] = useState<Block[]>([]);
@@ -53,15 +54,17 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     const pending = jobs.find(j => j.operation === 'extract_requirements' && j.document_id === docId && ['queued', 'running'].includes(j.status));
     if (pending) setActiveJobId(pending.id);
     setDocs(documents.reverse()); setBlocks(original); setGroups(grouped.topics); setReqs(requirements);
-    setSelectedId(prev => requirements.some(r => r.id === prev) ? prev : (requirements[0]?.id || ''));
-  }, [projectId, docId]);
+    setSelectedId(prev => requirements.some(r => r.id === prev) ? prev : (requirements.find(r => r.id === reviewFocus?.requirementId)?.id || requirements[0]?.id || ''));
+    const focused = requirements.find(r => r.id === reviewFocus?.requirementId);
+    if (focused?.source_refs[0]?.block_id) setBlockId(prev => prev || focused.source_refs[0].block_id);
+  }, [projectId, docId, reviewFocus]);
   useEffect(() => {
     let active = true;
     if (projectId) fetchAll<Doc>(`/projects/${projectId}/documents`).then(items => {
-      if (active) { setDocs(items.reverse()); setDocId(items[0]?.id || ''); }
+      if (active) { setDocs(items.reverse()); setDocId(items.find(d => d.id === reviewFocus?.documentId)?.id || items[0]?.id || ''); setAnalysisTarget(null); }
     }).catch(e => active && setMessage(errorMessage(e)));
     return () => { active = false; };
-  }, [projectId]);
+  }, [projectId, reviewFocus, setAnalysisTarget]);
   useEffect(() => { void Promise.resolve().then(load).catch(e => setMessage(errorMessage(e))); }, [load]);
   useEffect(() => {
     if (!activeJobId || !projectId) return;
@@ -152,6 +155,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   if (!projectId) return <Button onClick={() => onNavigateStep('SETUP')}>프로젝트를 먼저 선택하세요</Button>;
   return <div className="max-w-7xl mx-auto space-y-5">
     <PageHeader stepTag="02 / REQUIREMENT ANALYSIS" title="명세 분석" description="원문에서 요구사항을 검토하고 주제·소주제별로 수락 조건을 확정합니다." />
+    {reviewFocus && selected?.id === reviewFocus.requirementId && <p className="p-3 rounded bg-slate-100 text-sm">검증에서 선택한 요구사항입니다. 판정 기준은 개정 {reviewFocus.revision}이며, 여기서는 현재 개정 {selected.revision}을 검토합니다. 수정 내용은 새 검증 실행부터 반영됩니다.</p>}
     {message && <p role="status" className="p-3 rounded bg-blue-50 text-sm whitespace-pre-wrap">{message}</p>}
     <div className="flex flex-wrap gap-2">
       <select aria-label="기획서 선택" className={field + ' max-w-sm'} value={docId} disabled={editing || busy} onChange={e => setDocId(e.target.value)}>{docs.map(d => <option key={d.id} value={d.id}>{d.filename} · 개정 {d.revision}</option>)}</select>

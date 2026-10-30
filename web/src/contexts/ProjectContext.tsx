@@ -3,6 +3,8 @@ import { createContext, useContext, useState, useRef } from "react";
 import type { ReactNode, MutableRefObject } from "react";
 
 interface ProjectContextType {
+  analysisTarget: { requirementId: string; documentId: string; revision: number } | null;
+  setAnalysisTarget: (value: { requirementId: string; documentId: string; revision: number } | null) => void;
   saveBeforeLeaveRef: MutableRefObject<(() => Promise<boolean>) | null>;
   projectId: string | null;
   unsavedChanges: boolean;
@@ -18,6 +20,7 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
   const [projectId, setProjectId] = useState<string | null>(() => localStorage.getItem("specpilot.projectId"));
 
   const saveBeforeLeaveRef = useRef<(() => Promise<boolean>) | null>(null);
+  const [analysisTarget, setAnalysisTarget] = useState<ProjectContextType['analysisTarget']>(null);
   const [unsavedChanges,setUnsavedChanges] = useState(false);
   const [navigationLocked,setNavigationLocked] = useState(false);
   const selectProject = (id: string | null) => {
@@ -26,7 +29,7 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
     setProjectId(id);
   };
   return (
-    <ProjectContext.Provider value={{ saveBeforeLeaveRef, projectId, setProjectId: selectProject, unsavedChanges, setUnsavedChanges, navigationLocked, setNavigationLocked }}>
+    <ProjectContext.Provider value={{ analysisTarget, setAnalysisTarget, saveBeforeLeaveRef, projectId, setProjectId: selectProject, unsavedChanges, setUnsavedChanges, navigationLocked, setNavigationLocked }}>
       {children}
     </ProjectContext.Provider>
   );

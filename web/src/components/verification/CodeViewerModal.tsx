@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { CodeBlock } from '../common/CodeBlock';
+import { CodeBlock, type CodeLineHighlight } from '../common/CodeBlock';
 
 export interface CodeEvidence {
   id: string;
@@ -11,6 +11,7 @@ export interface CodeEvidence {
   scope: string;
   explanation: string;
   suggested_code?: string | null;
+  lineHighlights?: Record<number, CodeLineHighlight>;
 }
 
 interface CodeViewerModalProps {
@@ -138,6 +139,7 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
                 filePath={evidence.file_path}
                 startLine={evidence.start_line}
                 showLineNumbers={true}
+                lineHighlights={evidence.lineHighlights}
                 badge={{
                   text: isProblem ? '불일치 코드' : '현재 코드',
                   variant: isProblem ? 'danger' : 'info',

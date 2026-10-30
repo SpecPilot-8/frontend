@@ -6,7 +6,7 @@ interface Props {
   review: DesignReview | null; error: string; loading: boolean; dirty: boolean;
   onRetry: () => void; onSelectCase: (id: string) => void; onSource: (links: RequirementLink[]) => void;
 }
-const statusLabels = {written: '시험 연결됨', review_needed: '검토 필요', missing: '관점 연결 없음'};
+const statusLabels = {written: '시험 연결됨', review_needed: '생성 설명 확인 필요', missing: '관점 연결 없음'};
 type ReviewRow = DesignReview['items'][number] | DesignReview['conditions'][number];
 const isPlanned = (item: ReviewRow): item is DesignReview['items'][number] => 'perspective' in item;
 
@@ -19,10 +19,10 @@ export function TestDesignReviewPanel({review, error, loading, dirty, onRetry, o
   const showConditions = !review?.plan_available || filter === 'conditions';
   const rows: ReviewRow[] = showConditions ? review?.conditions.filter(i => `${i.requirement_title} ${i.condition_text}`.toLowerCase().includes(key)) || []
     : review?.items.filter(i => (filter !== 'attention' || i.status !== 'written') && `${i.requirement_title} ${i.condition_text} ${i.label}`.toLowerCase().includes(key)) || [];
-  return <Card title="시험 설계 점검" description="명세와 시험의 연결, 아직 확인할 내용을 검토합니다." extra={<Button variant="secondary" disabled={loading||!!error||!review} onClick={()=>setExpanded(!expanded)}>{expanded?'점검 항목 접기':'점검 항목 보기'}</Button>}>
+  return <Card title="시험 관점 연결 점검" description="생성 계획과 시험 단계의 연결을 확인합니다." extra={<Button variant="secondary" disabled={loading||!!error||!review} onClick={()=>setExpanded(!expanded)}>{expanded?'점검 항목 접기':'점검 항목 보기'}</Button>}>
     {loading ? <p className="text-sm text-slate-500">설계 점검 정보를 불러오는 중입니다.</p> : error ? <div role="status" className="space-y-2"><p className="text-sm text-amber-800">설계 점검 정보를 불러오지 못했습니다. {error}</p><Button variant="secondary" onClick={onRetry}>점검 정보 다시 조회</Button></div> : review && <div className="space-y-4">
-      <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm"><p>조건 연결 <strong>{review.summary.conditions_linked} / {review.summary.conditions_total}</strong></p>{review.plan_available && <><p>시험 연결됨 <strong>{review.summary.intents_written}</strong>개 관점</p><p>검토 필요 <strong>{review.summary.intents_review_needed}</strong>개</p><p>관점 연결 없음 <strong>{review.summary.intents_missing}</strong>개</p></>}</div>
-      <p className="text-xs leading-6 text-slate-500">시험 단계와 설계 기록의 연결을 집계한 값입니다. 실제 시험 통과나 검증의 충분성을 뜻하지 않습니다.{dirty && ' 편집 중인 내용은 저장 후 점검에 반영됩니다.'}</p>
+      <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm"><p>조건 연결 <strong>{review.summary.conditions_linked} / {review.summary.conditions_total}</strong></p>{review.plan_available && <><p>시험 연결됨 <strong>{review.summary.intents_written}</strong>개 관점</p><p>생성 설명 확인 <strong>{review.summary.intents_review_needed}</strong>개</p><p>관점 연결 없음 <strong>{review.summary.intents_missing}</strong>개</p></>}</div>
+      <p className="text-xs leading-6 text-slate-500">생성 당시 관점·설계 기록과 현재 단계의 연결을 집계합니다. 사람의 설계 적합성 검토는 아래 요구사항 대조 패널에 별도로 저장하며 실제 수행 결과와 구분합니다.{dirty && ' 편집 중인 내용은 저장 후 점검에 반영됩니다.'}</p>
       {!review.plan_available && <p className="rounded-lg bg-slate-50 border border-slate-200 px-3 py-2 text-sm leading-6">이 사양서에는 작성 당시 시험 관점 계획이 저장되지 않았습니다. 기존 원문 연결과 연결되지 않은 조건을 확인할 수 있습니다.</p>}
       {expanded&&<><div className="flex flex-wrap items-center gap-2">
         {review.plan_available && ([['attention','검토할 관점'],['all','전체 관점'],['conditions','원문 조건']] as const).map(([value,label]) => <button key={value} aria-pressed={filter === value} className={`border rounded px-3 py-1.5 text-xs ${filter === value ? 'border-blue-300 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600'}`} onClick={() => {setFilter(value); setLimit(5);}}>{label}</button>)}

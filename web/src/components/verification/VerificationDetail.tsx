@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { RequirementPanel } from "./RequirementPanel";
-import { Button, CodeBlock, type CodeLineHighlight } from "../common";
+import { Button, CodeBlock } from "../common";
 import { CodeViewerModal, type CodeEvidence } from "./CodeViewerModal";
 import { useProject } from "../../contexts/ProjectContext";
 import { api, errorMessage } from "../../services/api";
-import { formatRequirementTitle, type Requirement } from "../../types/verification";
-import type { StepId, Condition } from "../../types";
+import type { Requirement } from "../../types/verification";
+import type { StepId } from "../../types";
 
 interface VerificationDetailProps {
   requirementId: string;
-  requirementRevision: number;
   runId: string;
   onSelectForTest?: () => void;
   onBack: () => void;
@@ -23,7 +22,6 @@ interface EvidenceItem {
   end_line: number;
   role: string;
   scope?: string;
-  condition_ids?: string[];
   explanation: string;
   code_snippet: string;
   suggested_code?: string;
@@ -38,126 +36,7 @@ interface CallFlowNode {
 interface ConditionVerdict {
   condition_id: string;
   status: string;
-  reason?: string;
-  evidence_ids?: string[];
 }
-
-const STOP_TOKENS = new Set([
-  'div', 'span', 'class', 'type', 'form', 'input', 'button', 'label', 'table', 'thead', 'tbody',
-  'return', 'const', 'function', 'public', 'private', 'protected', 'string', 'number', 'boolean',
-  'import', 'export', 'default', 'from', 'true', 'false', 'null', 'void', 'this', 'async', 'await',
-  'http', 'https', 'html', 'java', 'json', 'text', 'name', 'value', 'data', 'item', 'list', 'page',
-]);
-
-function statusToHighlight(status?: string | null, isProblem?: boolean): CodeLineHighlight {
-  if (status === 'implemented') return 'match';
-  if (status === 'mismatch' || status === 'partial') return 'mismatch';
-  if (status === 'needs_review' || status === 'not_found' || status === 'not_statically_verifiable') return 'review';
-  return isProblem ? 'mismatch' : 'match';
-}
-
-function extractReasonTokens(reason: string, filePath: string): string[] {
-  const fileName = (filePath.split('/').pop() || '').toLowerCase();
-  const baseName = fileName.replace(/\.[^.]+$/, '');
-  const rawMatches = reason.match(/[A-Za-z_][A-Za-z0-9_./:=-]{2,}|\/[A-Za-z0-9_./*-]{2,}/g) || [];
-  const tokens = new Set<string>();
-
-  for (const raw of rawMatches) {
-    const parts = raw.split(/[=:]/).filter(Boolean);
-    for (const part of [raw, ...parts]) {
-      const cleaned = part.replace(/^[/.*-]+|[/.*-]+$/g, '');
-      const lower = cleaned.toLowerCase();
-      if (cleaned.length < 3) continue;
-      if (lower === fileName || lower === baseName) continue;
-      if (STOP_TOKENS.has(lower)) continue;
-      tokens.add(part.replace(/\/\*$/, ''));
-      if (cleaned.length >= 3) tokens.add(cleaned);
-    }
-  }
-  return [...tokens];
-}
-
-function computeLineHighlights(
-  ev: EvidenceItem,
-  verdicts: ConditionVerdict[],
-  selectedConditionId: string | null,
-  overallStatus?: string,
-): Record<number, CodeLineHighlight> {
-  const result: Record<number, CodeLineHighlight> = {};
-  const rawLines = (ev.code_snippet || '').split('\n');
-  if (!rawLines.length) return result;
-
-  const linkedVerdicts = verdicts.filter(
-    v => ev.condition_ids?.includes(v.condition_id) || v.evidence_ids?.includes(ev.id),
-  );
-  const activeVerdicts =
-    selectedConditionId && linkedVerdicts.some(v => v.condition_id === selectedConditionId)
-      ? linkedVerdicts.filter(v => v.condition_id === selectedConditionId)
-      : linkedVerdicts;
-
-  if (ev.suggested_code) {
-    const suggestedSet = new Set(
-      ev.suggested_code.split('\n').map(l => l.trim()).filter(Boolean),
-    );
-    rawLines.forEach((line, idx) => {
-      const trimmed = line.trim();
-      if (trimmed.length > 2 && !suggestedSet.has(trimmed)) {
-        result[ev.start_line + idx] = 'mismatch';
-      }
-    });
-  }
-
-  const priority: Record<CodeLineHighlight, number> = { match: 1, review: 2, mismatch: 3 };
-  const sources = activeVerdicts.length > 0
-    ? activeVerdicts.map(v => ({
-        hl: statusToHighlight(v.status, ev.role === 'problem'),
-        text: v.reason || ev.explanation || '',
-      }))
-    : [{
-        hl: statusToHighlight(overallStatus, ev.role === 'problem'),
-        text: ev.explanation || '',
-      }];
-
-  for (const src of sources) {
-    const tokens = extractReasonTokens(src.text, ev.file_path);
-    if (!tokens.length) continue;
-    rawLines.forEach((line, idx) => {
-      const trimmed = line.trim();
-      if (!trimmed || /^[{}()[\];,</>]+$/.test(trimmed)) return;
-      const lowerLine = line.toLowerCase();
-      const matched = tokens.some(tok =>
-        tok.length >= 4 ? lowerLine.includes(tok.toLowerCase()) : line.includes(tok),
-      );
-      if (matched) {
-        const lineNo = ev.start_line + idx;
-        const prev = result[lineNo];
-        if (!prev || priority[src.hl] >= priority[prev]) {
-          result[lineNo] = src.hl;
-        }
-      }
-    });
-  }
-
-  return result;
-}
-
-const verdictBadgeLabel: Record<string, string> = {
-  implemented: '구현됨',
-  partial: '부분 구현',
-  mismatch: '불일치',
-  not_found: '미구현 후보',
-  needs_review: '확인 필요',
-  not_statically_verifiable: '정적 검증 불가',
-};
-
-const verdictBadgeStyle: Record<string, string> = {
-  implemented: 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  partial: 'bg-amber-50 text-amber-700 border-amber-200',
-  mismatch: 'bg-rose-50 text-rose-700 border-rose-200',
-  not_found: 'bg-blue-50 text-blue-700 border-blue-200',
-  needs_review: 'bg-amber-50 text-amber-700 border-amber-200',
-  not_statically_verifiable: 'bg-slate-100 text-slate-600 border-slate-200',
-};
 
 interface VerificationDetailData {
   status: string;
@@ -177,7 +56,7 @@ interface VerificationDetailData {
 
 export const VerificationDetail: React.FC<VerificationDetailProps> = ({
   requirementId,
-  requirementRevision, runId, onSelectForTest,
+  runId, onSelectForTest,
   onBack,
   onNavigateStep,
 }) => {
@@ -191,7 +70,6 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
   const [openEvidenceIds, setOpenEvidenceIds] = useState<Set<string>>(
     new Set(),
   );
-  const [selectedConditionId, setSelectedConditionId] = useState<string | null>(null);
   const [modalEvidence, setModalEvidence] = useState<CodeEvidence | null>(null);
 
   useEffect(() => {
@@ -201,7 +79,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
       setIsLoading(true);
       try {
         const [req, detailData] = await Promise.all([
-          api<Requirement>(`/projects/${projectId}/requirements/${requirementId}?revision=${requirementRevision}`),
+          api<Requirement>(`/projects/${projectId}/requirements/${requirementId}`),
           api<VerificationDetailData>(`/projects/${projectId}/verification-runs/${runId}/requirements/${requirementId}`),
         ]);
         setRequirement(req); setVerificationData(detailData);
@@ -214,7 +92,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
       }
     };
     fetchData();
-  }, [projectId, requirementId, requirementRevision, runId]);
+  }, [projectId, requirementId, runId]);
 
   const toggleEvidence = (id: string) => {
     const newSet = new Set(openEvidenceIds);
@@ -272,34 +150,14 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
       </div>
 
       <div className="flex flex-col xl:flex-row gap-6 items-start min-w-0">
-        <RequirementPanel
-          projectId={projectId || ""}
-          requirement={requirement}
-          verificationData={verificationData}
-          selectedConditionId={selectedConditionId}
-          onSelectCondition={(condId, evIds) => {
-            setSelectedConditionId(prev => (prev === condId ? null : condId));
-            if (evIds.length > 0) {
-              setOpenEvidenceIds(new Set(evIds));
-              setTimeout(() => document.getElementById(`evidence-${evIds[0]}`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }), 0);
-            }
-          }}
-          onReview={() => { setAnalysisTarget({ requirementId, documentId: requirement.document_id || "", revision: requirementRevision }); onNavigateStep("ANALYSIS"); }}
-        />
+        <RequirementPanel projectId={projectId || ""} requirement={requirement} verificationData={verificationData} onReview={() => { setAnalysisTarget({ requirementId, documentId: requirement.document_id || "" }); onNavigateStep("ANALYSIS"); }} />
 
         <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-6 w-full">
-          <div className="flex flex-wrap justify-between items-end gap-3 mb-4 border-b border-slate-100 pb-4">
+          <div className="flex flex-wrap justify-between items-end gap-3 mb-6 border-b border-slate-100 pb-4">
             <div className="min-w-0">
-              <div className="flex flex-wrap items-center gap-2 mb-1.5">
-                <h3 className="text-base font-bold text-slate-900">
-                  정적 참조 흐름 · 코드 근거
-                </h3>
-                {verificationData.status && (
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-semibold border ${verdictBadgeStyle[verificationData.status] || 'bg-slate-100 text-slate-600 border-slate-200'}`}>
-                    종합: {verdictBadgeLabel[verificationData.status] || verificationData.status}
-                  </span>
-                )}
-              </div>
+              <h3 className="text-base font-bold text-slate-900 mb-1.5">
+                정적 참조 흐름 · 코드 근거
+              </h3>
               <p className="text-[13px] text-slate-500">
                 파일·줄 번호별로 펼쳐 확인하세요. 목록이 길면 아래로 스크롤할 수 있습니다.
               </p>
@@ -308,33 +166,6 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
               {verificationData.counts?.files || 0}개 파일 · 근거{" "}
               {verificationData.counts?.evidence_locations || 0}곳
             </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-3 py-2 rounded-lg bg-slate-50 border border-slate-100 text-xs text-slate-600">
-            <div className="flex flex-wrap items-center gap-3">
-              <span className="font-semibold text-slate-700">코드 줄 하이라이팅:</span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-xs bg-emerald-500/80 inline-block" />
-                <span>일치 (구현됨)</span>
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-xs bg-rose-500/80 inline-block" />
-                <span>불일치 / 부분 구현</span>
-              </span>
-              <span className="inline-flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-xs bg-amber-500/80 inline-block" />
-                <span>확인 필요</span>
-              </span>
-            </div>
-            {selectedConditionId && (
-              <button
-                type="button"
-                onClick={() => setSelectedConditionId(null)}
-                className="text-blue-600 hover:underline font-medium cursor-pointer"
-              >
-                선택 조건 필터 해제
-              </button>
-            )}
           </div>
 
           {verificationData.call_flow?.nodes &&
@@ -376,24 +207,6 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
             {verificationData.evidence?.map((ev: EvidenceItem) => {
               const isOpen = openEvidenceIds.has(ev.id);
               const isProblem = ev.role === "problem";
-              const verdicts = verificationData.condition_verdicts || [];
-              const reqConditions = ((requirement as unknown as { conditions?: Condition[] }).conditions || []);
-              const linkedCondBadges = reqConditions
-                .map((c, idx) => {
-                  const cId = c.id || c.stable_key;
-                  const v = verdicts.find(item => item.condition_id === cId || item.condition_id === c.stable_key);
-                  const isLinked = ev.condition_ids?.includes(cId) || v?.evidence_ids?.includes(ev.id);
-                  if (!isLinked) return null;
-                  return { index: idx + 1, status: v?.status || 'not_run', id: cId };
-                })
-                .filter(Boolean) as { index: number; status: string; id: string }[];
-
-              const lineHighlights = computeLineHighlights(
-                ev,
-                verdicts,
-                selectedConditionId,
-                verificationData.status,
-              );
 
               return (
                 <div
@@ -409,20 +222,10 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                     className={`w-full min-w-0 px-4 py-3 flex justify-between items-start gap-3 text-left transition-colors ${isOpen ? (isProblem ? "bg-red-50" : "bg-blue-50") : "bg-white hover:bg-slate-50"}`}
                   >
                     <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <span className="text-sm font-bold text-slate-800 wrap-anywhere">
-                          {ev.file_path.split('/').pop()}
-                          <span className="ml-2 inline-block whitespace-nowrap text-xs font-medium text-slate-500">L{ev.start_line}–{ev.end_line}</span>
-                        </span>
-                        {linkedCondBadges.map(badge => (
-                          <span
-                            key={badge.id}
-                            className={`px-1.5 py-0.5 rounded text-[11px] font-semibold border ${verdictBadgeStyle[badge.status] || 'bg-slate-100 text-slate-600 border-slate-200'}`}
-                          >
-                            조건 {badge.index} · {verdictBadgeLabel[badge.status] || badge.status}
-                          </span>
-                        ))}
-                      </div>
+                      <span className="block text-sm font-bold text-slate-800 wrap-anywhere">
+                        {ev.file_path.split('/').pop()}
+                        <span className="ml-2 inline-block whitespace-nowrap text-xs font-medium text-slate-500">L{ev.start_line}–{ev.end_line}</span>
+                      </span>
                       <span className="block text-[11px] text-slate-500 wrap-anywhere">
                         {ev.file_path}
                       </span>
@@ -456,21 +259,6 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                         >
                           코드 스니펫 (L{ev.start_line}~L{ev.end_line})
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => setModalEvidence({
-                            ...ev,
-                            scope: ev.scope || (ev.role === 'problem' ? 'this_screen' : 'other_screen'),
-                            lineHighlights,
-                          })}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
-                          title="팝업창으로 코드 크게 보기"
-                        >
-                          <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                          </svg>
-                          <span>팝업으로 크게 보기</span>
-                        </button>
                       </div>
 
                       <div
@@ -478,7 +266,6 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                         onClick={() => setModalEvidence({
                           ...ev,
                           scope: ev.scope || (ev.role === 'problem' ? 'this_screen' : 'other_screen'),
-                          lineHighlights,
                         })}
                         title="클릭하여 팝업창으로 코드 크게 보기"
                       >
@@ -488,7 +275,6 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                           startLine={ev.start_line}
                           maxLines={6}
                           showLineNumbers={true}
-                          lineHighlights={lineHighlights}
                         />
                         <div className="absolute inset-0 bg-blue-500/0 group-hover:bg-blue-500/5 transition-colors rounded-lg pointer-events-none flex items-center justify-center">
                           <span className="opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/80 text-white text-xs px-3 py-1.5 rounded-full shadow-lg font-medium backdrop-blur-xs">
@@ -512,7 +298,6 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                               onClick={() => setModalEvidence({
                                 ...ev,
                                 scope: ev.scope || 'this_screen',
-                                lineHighlights,
                               })}
                               className="text-xs text-emerald-700 hover:underline font-medium cursor-pointer"
                             >
@@ -542,7 +327,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
         isOpen={!!modalEvidence}
         onClose={() => setModalEvidence(null)}
         evidence={modalEvidence}
-        requirementTitle={formatRequirementTitle(requirement?.title, requirement?.original_text, (requirement as unknown as { conditions?: Condition[] })?.conditions)}
+        requirementTitle={requirement?.title}
       />
     </div>
   );

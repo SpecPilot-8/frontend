@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { StepId, Condition, RequirementItem } from '../types';
 import { useProject } from '../contexts/ProjectContext';
 import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } from '../services/api';
@@ -6,7 +6,7 @@ import { ParsingWarnings } from '../components/ParsingWarnings';
 import { ExtractionLoadingModal } from '../components/ExtractionLoadingModal';
 import { Button, Card, PageHeader } from '../components/common';
 
-interface Doc { id: string; filename: string; revision: number; parse_status: string; parser_version?: string; screens?: { page: number }[]; warnings: { code?: string; message: string }[] }
+interface Doc { id: string; filename: string; revision: number; parse_status: string; parser_version?: string; screens?: { page: number; screen_name?: string; screen_id?: string }[]; warnings: { code?: string; message: string }[] }
 interface Block { id: string; text: string; location: { index: number }; structure: { section: string; label: string | null } }
 interface Group { id: string; title: string; subtopics: { id: string; title: string }[] }
 interface ExtractionJob { id: string; document_id?: string; operation: string; status: string; progress?: { completed: number; total: number }; result?: { requirement_count: number; condition_count: number }; error?: { message: string }; missing_features: { message: string }[] }
@@ -36,6 +36,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   const [activeJobId, setActiveJobId] = useState('');
   const [extractProgress, setExtractProgress] = useState<{ completed: number; total: number } | null>(null);
   const [acknowledgedFor, setAcknowledgedFor] = useState('');
+  const [selectedPageFilter, setSelectedPageFilter] = useState<string>('all');
   const selected = reqs.find(r => r.id === selectedId);
   const document = docs.find(d => d.id === docId);
   const source = blocks.find(b => b.id === blockId);
@@ -164,6 +165,63 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     try { await api(`${base}/requirements/${selected.id}/review`, jsonRequest('PUT', { base_revision: selected.revision, status: 'approved' })); await load(); setMessage('검토를 확정했습니다.'); }
     catch (e) { setMessage(errorMessage(e)); } finally { setBusy(false); }
   };
+
+  const unapprovedReqs = useMemo(() => reqs.filter(r => r.review_status !== 'approved'), [reqs]);
+
+  const approveAll = async () => {
+    if (!unapprovedReqs.length || editing || busy) return;
+    if (!window.confirm(`선택한 문서의 미확정 요구사항 ${unapprovedReqs.length}개를 원문과 대조하셨나요? 확인한 내용을 모두 검토 확정합니다.`)) return;
+    setBusy(true);
+    setMessage(`요구사항 ${unapprovedReqs.length}개를 검토 확정하고 있습니다...`);
+    let approved = 0;
+    try {
+      for (const req of unapprovedReqs) {
+        await api(`${base}/requirements/${req.id}/review`, jsonRequest('PUT', { base_revision: req.revision, status: 'approved' }));
+        approved += 1;
+      }
+      await load();
+      setMessage(`이 문서의 요구사항 ${approved}개를 검토 확정했습니다.`);
+    } catch (err) {
+      await load().catch(() => undefined);
+      setMessage(`${approved}개 저장 후 중단했습니다. 남은 미확정 항목을 확인하세요. ${errorMessage(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const screenMap = useMemo(() => {
+    const map: Record<number, string> = {};
+    if (document?.screens) {
+      document.screens.forEach((s) => {
+        if (s.page) {
+          const name = s.screen_name ? ` · ${s.screen_name}` : '';
+          const id = s.screen_id && !s.screen_id.startsWith('UNKNOWN-') ? ` (${s.screen_id})` : '';
+          map[s.page] = `${name}${id}`;
+        }
+      });
+    }
+    return map;
+  }, [document]);
+
+  const blocksByPage = useMemo(() => {
+    const groups: Record<number, Block[]> = {};
+    blocks.forEach(b => {
+      const p = b.location?.index || 1;
+      if (!groups[p]) groups[p] = [];
+      groups[p].push(b);
+    });
+    return groups;
+  }, [blocks]);
+
+  const availablePages = useMemo(() => {
+    return Object.keys(blocksByPage).map(Number).sort((a, b) => a - b);
+  }, [blocksByPage]);
+
+  const filteredBlocks = useMemo(() => {
+    if (selectedPageFilter === 'all') return blocks;
+    const pageNum = Number(selectedPageFilter);
+    return blocks.filter(b => b.location?.index === pageNum);
+  }, [blocks, selectedPageFilter]);
   if (!projectId) return <Button onClick={() => onNavigateStep('SETUP')}>프로젝트를 먼저 선택하세요</Button>;
 
   const canExtract = Boolean(
@@ -251,9 +309,22 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
             )}
 
             {reqs.length > 0 && (
-              <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200/60">
-                요구사항 {reqs.length}개 ({reqs.filter(r => r.review_status === 'approved').length}개 확정)
-              </span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200/60">
+                  요구사항 {reqs.length}개 ({reqs.filter(r => r.review_status === 'approved').length}개 확정)
+                </span>
+                {unapprovedReqs.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={approveAll}
+                    disabled={busy || editing}
+                    className="text-[11px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-full transition-colors flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                    title="미확정 요구사항을 한 번에 모두 확정합니다"
+                  >
+                    <span>이 문서 미확정 {unapprovedReqs.length}개 검토 확정</span>
+                  </button>
+                )}
+              </div>
             )}
           </div>
 
@@ -370,14 +441,70 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
       <p>서버 모델로 {document.screens?.length || 0}개 화면의 원문을 순서대로 분석합니다. 화면마다 모델 호출 비용이 발생하며 결과는 검토 전 초안으로 저장합니다.</p>
       {document.warnings.length > 0 && <label className="flex items-center gap-2"><input type="checkbox" checked={warningAccepted} disabled={busy} onChange={e => setAcknowledgedFor(e.target.checked ? warningKey : '')} />OCR·표 경고와 원문을 확인했으며 이 결과로 요구사항 추출을 진행합니다.</label>}
     </div>}
-    <div className="grid xl:grid-cols-[300px_1fr] gap-5">
+    <div className="grid xl:grid-cols-[320px_1fr] gap-5">
       <Card title="문서 원문" description={`${blocks.length}개 블록`}>
-        <select aria-label="원문 블록 선택" className={field} value={blockId} disabled={editing && !isNew} onChange={e => setBlockId(e.target.value)}>
-          <option value="">출처를 선택하세요</option>{blocks.map(b => <option key={b.id} value={b.id}>{b.location.index}쪽 · {b.structure.section} {b.structure.label} · {b.text.slice(0,35)}</option>)}
-        </select>
-        {source && <><p className="text-sm whitespace-pre-wrap my-4 select-text">{source.text}</p><a className="text-blue-600 text-sm" target="_blank" rel="noreferrer" href={`${BASE_URL}${base}/documents/${docId}/file#page=${source.location.index}`}>PDF {source.location.index}쪽 열기</a></>}
-        <hr className="my-4" /><input aria-label="요구사항 검색" className={field} placeholder="요구사항 검색" value={search} onChange={e => setSearch(e.target.value)} />
-        <div className="mt-3 space-y-2 max-h-[500px] overflow-y-auto">{reqs.filter(r => `${r.title} ${groupName(r)}`.includes(search)).map(r => <button disabled={editing || busy} onClick={() => setSelectedId(r.id)} key={r.id} className={`w-full text-left p-3 rounded border text-sm ${r.id === selectedId ? 'bg-blue-50 border-blue-400' : ''}`}><small className="block text-slate-500">{groupName(r)}</small>{r.title}<small className="block">{r.review_status === 'approved' ? '검토 완료' : '검토 필요'} · 개정 {r.revision}</small></button>)}</div>
+        {/* 원문 출처 쪽수 필터 및 카테고리 드롭다운 */}
+        <div className="space-y-2 mb-3">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-700">원문 출처 선택</span>
+            {availablePages.length > 1 && (
+              <div className="flex items-center gap-1 text-[11px] text-slate-500">
+                <label htmlFor="page-filter">쪽수 필터:</label>
+                <select
+                  id="page-filter"
+                  value={selectedPageFilter}
+                  onChange={e => setSelectedPageFilter(e.target.value)}
+                  className="border border-slate-200 rounded px-1.5 py-0.5 text-[11px] bg-slate-50 focus:outline-none focus:border-blue-500"
+                >
+                  <option value="all">전체 쪽수 ({availablePages.length}쪽)</option>
+                  {availablePages.map(p => (
+                    <option key={p} value={String(p)}>
+                      {p}쪽 {screenMap[p] || ''} ({blocksByPage[p]?.length || 0}개)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          <select
+            aria-label="원문 블록 선택"
+            className={field}
+            value={blockId}
+            disabled={editing && !isNew}
+            onChange={e => setBlockId(e.target.value)}
+          >
+            <option value="">출처를 선택하세요 ({filteredBlocks.length}개 블록)</option>
+            {selectedPageFilter === 'all' ? (
+              availablePages.map(p => {
+                const pBlocks = blocksByPage[p] || [];
+                const title = `${p}쪽${screenMap[p] || ''} (${pBlocks.length}개)`;
+                return (
+                  <optgroup key={p} label={title}>
+                    {pBlocks.map(b => (
+                      <option key={b.id} value={b.id}>
+                        {b.structure.section}{b.structure.label ? ` [${b.structure.label}]` : ''} · {b.text.slice(0, 35)}
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })
+            ) : (
+              filteredBlocks.map(b => (
+                <option key={b.id} value={b.id}>
+                  {b.location.index}쪽 · {b.structure.section}{b.structure.label ? ` [${b.structure.label}]` : ''} · {b.text.slice(0, 35)}
+                </option>
+              ))
+            )}
+          </select>
+        </div>
+
+        {source && <><p className="text-sm whitespace-pre-wrap my-4 select-text bg-slate-50 p-2.5 rounded border border-slate-100">{source.text}</p><a className="text-blue-600 text-sm font-medium hover:underline inline-block mb-3" target="_blank" rel="noreferrer" href={`${BASE_URL}${base}/documents/${docId}/file#page=${source.location.index}`}>PDF {source.location.index}쪽 원문 열기 ↗</a></>}
+
+        <hr className="my-3 border-slate-100" />
+
+        <input aria-label="요구사항 검색" className={field} placeholder="요구사항 검색" value={search} onChange={e => setSearch(e.target.value)} />
+        <div className="mt-3 space-y-2 max-h-[500px] overflow-y-auto">{reqs.filter(r => `${r.title} ${groupName(r)}`.includes(search)).map(r => <button disabled={editing || busy} onClick={() => setSelectedId(r.id)} key={r.id} className={`w-full text-left p-3 rounded border text-sm transition-colors ${r.id === selectedId ? 'bg-blue-50 border-blue-400' : 'bg-white hover:bg-slate-50'}`}><small className="block text-slate-500">{groupName(r)}</small>{r.title}<small className={`block font-semibold mt-0.5 ${r.review_status === 'approved' ? 'text-emerald-600' : 'text-amber-600'}`}>{r.review_status === 'approved' ? '✓ 검토 확정' : '검토 필요'} · 개정 {r.revision}</small></button>)}</div>
       </Card>
       <Card title={editing ? (isNew ? '요구사항 추가' : '요구사항 편집') : selected?.title || '등록된 요구사항이 없습니다'}>
         {editing ? <form onSubmit={save} className="space-y-3">
@@ -393,10 +520,20 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
           </fieldset>)}
           <div className="flex gap-2"><Button type="button" variant="secondary" disabled={busy} onClick={() => setConditions(prev => [...prev,blankCondition()])}>조건 추가</Button><Button type="submit" disabled={busy}>저장</Button><Button type="button" variant="secondary" disabled={busy} onClick={() => {setEditing(false);setUnsavedChanges(false);}}>취소</Button></div>
         </form> : selected ? <div className="space-y-4">
-          <p>{groupName(selected)} · 개정 {selected.revision}</p><p className="whitespace-pre-wrap select-text text-sm">{selected.original_text || '원문 출처 없음: 사용자가 수동 작성한 항목입니다.'}</p>
-          {selected.review_reasons?.length ? <ul className="text-sm text-amber-800 list-disc pl-5">{selected.review_reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul> : null}
-          {selected.conditions.map(c => <div key={c.id || c.stable_key} className="border rounded p-3 text-sm"><small>{categoryLabels[c.category]} · {c.target} · {c.verifiable}</small><p>{c.text}</p></div>)}
-          <div className="flex gap-2"><Button onClick={() => startEdit(false)} disabled={busy}>요구사항 편집</Button><Button onClick={approve} disabled={busy || selected.review_status==='approved'}>검토 확정</Button></div>
+          <p className="text-xs font-semibold text-slate-500">{groupName(selected)} · 개정 {selected.revision}</p>
+          <p className="whitespace-pre-wrap select-text text-sm bg-slate-50 p-3 rounded-lg border border-slate-100">{selected.original_text || '원문 출처 없음: 사용자가 수동 작성한 항목입니다.'}</p>
+          {selected.review_reasons?.length ? <ul className="text-sm text-amber-800 list-disc pl-5 bg-amber-50/60 p-2.5 rounded-lg border border-amber-100">{selected.review_reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul> : null}
+          <div className="space-y-2">
+            <h4 className="text-xs font-bold text-slate-700">수락 조건 ({selected.conditions.length}개)</h4>
+            {selected.conditions.map(c => <div key={c.id || c.stable_key} className="border rounded-lg p-3 text-sm bg-white shadow-xs"><small className="text-blue-700 font-semibold">{categoryLabels[c.category]} · {c.target} · {c.verifiable}</small><p className="mt-1 text-slate-800">{c.text}</p></div>)}
+          </div>
+          <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
+            <Button onClick={() => startEdit(false)} disabled={busy} variant="secondary">요구사항 편집</Button>
+            <Button onClick={approve} disabled={busy || selected.review_status==='approved'} variant={selected.review_status==='approved' ? 'secondary' : 'primary'}>
+              {selected.review_status === 'approved' ? '✓ 검토 확정 완료' : '현재 요구사항 검토 확정'}
+            </Button>
+
+          </div>
         </div> : <p className="text-sm text-slate-500">문서를 파싱한 뒤 원문을 선택해 수동 등록할 수 있습니다. 서버 모델 연결과 파싱 경고를 확인하면 AI 요구사항을 추출할 수 있습니다.</p>}
       </Card>
       </div>

@@ -57,7 +57,7 @@ export const RequirementPanel: React.FC<RequirementPanelProps> = ({ projectId, r
   }).filter(Boolean) as { key: string; label: string; total: number; implemented: number }[];
 
   return (
-    <div className="w-full md:w-[44%] shrink-0 space-y-6">
+    <div className="w-full min-w-0 xl:w-[44%] shrink-0 space-y-6 [overflow-wrap:anywhere]">
       <Card className="p-6 flex flex-col gap-6">
         <div>
           <h3 className="text-lg font-bold text-slate-900 mb-1">요구사항</h3>

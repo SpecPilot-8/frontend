@@ -5,10 +5,11 @@ import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } fro
 import { ParsingWarnings } from '../components/ParsingWarnings';
 import { Button, Card, PageHeader } from '../components/common';
 
-interface Doc { id: string; filename: string; revision: number; parse_status: string; parser_version?: string; warnings: { code?: string; message: string }[] }
+interface Doc { id: string; filename: string; revision: number; parse_status: string; parser_version?: string; screens?: { page: number }[]; warnings: { code?: string; message: string }[] }
 interface Block { id: string; text: string; location: { index: number }; structure: { section: string; label: string | null } }
 interface Group { id: string; title: string; subtopics: { id: string; title: string }[] }
-type Req = RequirementItem & { revision: number; document_id: string; document_revision: number; source_refs: { block_id: string; quote: string }[] };
+interface ExtractionJob { id: string; document_id?: string; operation: string; status: string; progress?: { completed: number; total: number }; result?: { requirement_count: number; condition_count: number }; error?: { message: string }; missing_features: { message: string }[] }
+type Req = RequirementItem & { review_reasons?: string[]; revision: number; document_id: string; document_revision: number; source_refs: { block_id: string; quote: string }[] };
 const categoryLabels = { display: '화면 표시', validation: '입력 검사', navigation: '화면 이동', business_logic: '비즈니스 로직', data: '데이터 저장', error_message: '오류 메시지' };
 const field = 'w-full border border-slate-200 rounded-lg p-2 text-sm bg-white';
 const blankCondition = (): Condition => ({ stable_key: crypto.randomUUID(), text: '', category: 'business_logic', target: 'unknown', verifiable: 'code', source_refs: [] });
@@ -31,19 +32,26 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   const [conditions, setConditions] = useState<Condition[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [activeJobId, setActiveJobId] = useState('');
+  const [acknowledgedFor, setAcknowledgedFor] = useState('');
   const selected = reqs.find(r => r.id === selectedId);
   const document = docs.find(d => d.id === docId);
   const source = blocks.find(b => b.id === blockId);
   const base = `/projects/${projectId}`;
+  const warningKey = `${docId}:${document?.revision}:${document?.parser_version}`;
+  const warningAccepted = !document?.warnings?.length || acknowledgedFor === warningKey;
 
   const load = useCallback(async () => {
     if (!projectId || !docId) return;
-    const [documents, original, grouped, requirements] = await Promise.all([
+    const [documents, original, grouped, requirements, jobs] = await Promise.all([
       fetchAll<Doc>(`/projects/${projectId}/documents`),
       fetchAll<Block>(`/projects/${projectId}/documents/${docId}/blocks`),
       api<{ topics: Group[] }>(`/projects/${projectId}/documents/${docId}/requirement-groups`),
       fetchAll<Req>(`/projects/${projectId}/requirements?document_id=${docId}`),
+      fetchAll<ExtractionJob>(`/projects/${projectId}/jobs`),
     ]);
+    const pending = jobs.find(j => j.operation === 'extract_requirements' && j.document_id === docId && ['queued', 'running'].includes(j.status));
+    if (pending) setActiveJobId(pending.id);
     setDocs(documents.reverse()); setBlocks(original); setGroups(grouped.topics); setReqs(requirements);
     setSelectedId(prev => requirements.some(r => r.id === prev) ? prev : (requirements[0]?.id || ''));
   }, [projectId, docId]);
@@ -55,6 +63,25 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     return () => { active = false; };
   }, [projectId]);
   useEffect(() => { void Promise.resolve().then(load).catch(e => setMessage(errorMessage(e))); }, [load]);
+  useEffect(() => {
+    if (!activeJobId || !projectId) return;
+    let active = true;
+    void Promise.resolve().then(async () => {
+      setBusy(true);
+      try {
+        const done = await pollJobStatus(projectId, activeJobId, job => {
+          if (active) setMessage(job.progress ? `AI 요구사항 추출 중 · 화면 ${job.progress.completed}/${job.progress.total}` : 'AI 요구사항 추출 대기 중');
+        }) as ExtractionJob;
+        if (!active) return;
+        await load();
+        setMessage(done.status === 'completed'
+          ? `요구사항 ${done.result?.requirement_count || 0}개 · 수락 조건 ${done.result?.condition_count || 0}개를 추출했습니다. 원문과 비교해 검토를 확정하세요.`
+          : done.error?.message || done.missing_features?.map(f => f.message).join(' / ') || `분석 상태: ${done.status}`);
+      } catch (e) { if (active) setMessage(errorMessage(e)); }
+      finally { if (active) { setBusy(false); setActiveJobId(''); } }
+    });
+    return () => { active = false; };
+  }, [activeJobId, projectId, load]);
   useEffect(() => {
     const warn = (event: BeforeUnloadEvent) => { if (editing) event.preventDefault(); };
     window.addEventListener('beforeunload', warn);
@@ -95,7 +122,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   useEffect(()=>{saveBeforeLeaveRef.current=editing?save:null;return()=>{saveBeforeLeaveRef.current=null;};},[saveBeforeLeaveRef,save,editing]);
   const parse = async () => {
     if (!document) return;
-    setBusy(true); setMessage('문서의 화면 표와 원문을 읽고 있습니다.');
+    setBusy(true); setAcknowledgedFor(''); setMessage('문서의 화면 표와 원문을 읽고 있습니다.');
     try {
       const job = await api<{ id: string }>(`${base}/documents/${docId}/parse`, jsonRequest('POST', { document_revision: document.revision, force: blocks.length > 0 }));
       const result = await pollJobStatus(projectId!, job.id) as { status: string };
@@ -103,17 +130,19 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     } catch (e) { setMessage(errorMessage(e)); } finally { setBusy(false); }
   };
   const extract = async () => {
-    if (!document) return;
-    setBusy(true);
+    if (!document || !warningAccepted) return;
+    setBusy(true); setMessage('서버 모델로 요구사항 추출을 준비하고 있습니다.');
     try {
-      const config = await api<{ config_version: number }>(`${base}/llm`);
-      const job = await api<{ id: string }>(`${base}/documents/${docId}/requirements/extract`, jsonRequest('POST', {
-        document_revision: document.revision, model_config_version: config.config_version, accept_warnings: true,
+      const config = await api<{ config_version: number; connection_status: string }>(`${base}/llm`);
+      if (config.connection_status !== 'connected') throw new Error('프로젝트 설정에서 실제 모델 연결을 먼저 확인해주세요.');
+      const job = await api<ExtractionJob>(`${base}/documents/${docId}/requirements/extract`, jsonRequest('POST', {
+        document_revision: document.revision, model_config_version: config.config_version, accept_warnings: warningAccepted,
       }));
-      const done = await pollJobStatus(projectId!, job.id) as { status: string; missing_features: { message: string }[] };
-      await load(); setMessage(done.status === 'blocked' ? done.missing_features.map(f => f.message).join(' / ') : `분석 상태: ${done.status}`);
-    } catch (e) { setMessage(errorMessage(e)); } finally { setBusy(false); }
+      if (['queued', 'running'].includes(job.status)) setActiveJobId(job.id);
+      else { setMessage(job.error?.message || job.missing_features?.map(f => f.message).join(' / ') || `분석 상태: ${job.status}`); setBusy(false); }
+    } catch (e) { setMessage(errorMessage(e)); setBusy(false); }
   };
+
   const approve = async () => {
     if (!selected) return;
     setBusy(true);
@@ -127,13 +156,18 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     <div className="flex flex-wrap gap-2">
       <select aria-label="기획서 선택" className={field + ' max-w-sm'} value={docId} disabled={editing || busy} onChange={e => setDocId(e.target.value)}>{docs.map(d => <option key={d.id} value={d.id}>{d.filename} · 개정 {d.revision}</option>)}</select>
       <Button onClick={parse} disabled={!document || busy || editing || reqs.length > 0}>{blocks.length ? "문서 다시 파싱" : "문서 파싱"}</Button>
-      <Button variant="secondary" onClick={extract} disabled={!blocks.length || busy || editing}>AI 요구사항 추출</Button>
+      <Button variant="secondary" onClick={extract} disabled={!blocks.length || busy || editing || !warningAccepted || reqs.length > 0 || document?.parser_version !== 'pdf-layout-2'}>AI 요구사항 추출</Button>
       <Button onClick={() => startEdit(true)} disabled={!document || busy || editing}>요구사항 수동 추가</Button>
       <Button variant="secondary" onClick={() => onNavigateStep('VERIFICATION')} disabled={editing || busy}>검증 결과로 이동</Button>
     </div>
     {document && blocks.length > 0 && <p className="text-sm text-slate-600">원문 {blocks.length}개 블록을 읽었습니다. {document.parse_status === 'partial' ? '일부 항목은 원문 확인이 필요합니다.' : '문서 읽기를 마쳤습니다.'}</p>}
+    {reqs.length > 0 && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">저장된 요구사항 {reqs.length}개 · 수락 조건 {reqs.reduce((sum, r) => sum + r.conditions.length, 0)}개. 원문과 비교한 뒤 검토를 확정하세요.</p>}
     {document?.parser_version && document.parser_version !== 'pdf-layout-2' && <p className="text-sm text-amber-800">이전 OCR 결과입니다. 한국어 OCR 설정을 적용한 뒤 ‘문서 다시 파싱’을 눌러주세요. 저장된 요구사항이 있다면 새 문서로 등록해야 합니다.</p>}
     {document?.warnings?.length ? <ParsingWarnings warnings={document.warnings} fileUrl={`${BASE_URL}${base}/documents/${docId}/file`} /> : null}
+    {document && blocks.length > 0 && reqs.length === 0 && <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2 text-sm">
+      <p>서버 모델로 {document.screens?.length || 0}개 화면의 원문을 순서대로 분석합니다. 화면마다 모델 호출 비용이 발생하며 결과는 검토 전 초안으로 저장합니다.</p>
+      {document.warnings.length > 0 && <label className="flex items-center gap-2"><input type="checkbox" checked={warningAccepted} disabled={busy} onChange={e => setAcknowledgedFor(e.target.checked ? warningKey : '')} />OCR·표 경고와 원문을 확인했으며 이 결과로 요구사항 추출을 진행합니다.</label>}
+    </div>}
     <div className="grid xl:grid-cols-[300px_1fr] gap-5">
       <Card title="문서 원문" description={`${blocks.length}개 블록`}>
         <select aria-label="원문 블록 선택" className={field} value={blockId} disabled={editing && !isNew} onChange={e => setBlockId(e.target.value)}>
@@ -158,9 +192,10 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
           <div className="flex gap-2"><Button type="button" variant="secondary" disabled={busy} onClick={() => setConditions(prev => [...prev,blankCondition()])}>조건 추가</Button><Button type="submit" disabled={busy}>저장</Button><Button type="button" variant="secondary" disabled={busy} onClick={() => {setEditing(false);setUnsavedChanges(false);}}>취소</Button></div>
         </form> : selected ? <div className="space-y-4">
           <p>{groupName(selected)} · 개정 {selected.revision}</p><p className="whitespace-pre-wrap select-text text-sm">{selected.original_text || '원문 출처 없음: 사용자가 수동 작성한 항목입니다.'}</p>
+          {selected.review_reasons?.length ? <ul className="text-sm text-amber-800 list-disc pl-5">{selected.review_reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul> : null}
           {selected.conditions.map(c => <div key={c.id || c.stable_key} className="border rounded p-3 text-sm"><small>{categoryLabels[c.category]} · {c.target} · {c.verifiable}</small><p>{c.text}</p></div>)}
           <div className="flex gap-2"><Button onClick={() => startEdit(false)} disabled={busy}>요구사항 편집</Button><Button onClick={approve} disabled={busy || selected.review_status==='approved'}>검토 확정</Button></div>
-        </div> : <p className="text-sm text-slate-500">문서를 파싱한 뒤 원문을 선택해 수동 등록할 수 있습니다. AI 미연결 상태에서는 자동 추출이 차단됩니다.</p>}
+        </div> : <p className="text-sm text-slate-500">문서를 파싱한 뒤 원문을 선택해 수동 등록할 수 있습니다. 서버 모델 연결과 파싱 경고를 확인하면 AI 요구사항을 추출할 수 있습니다.</p>}
       </Card>
     </div>
   </div>;

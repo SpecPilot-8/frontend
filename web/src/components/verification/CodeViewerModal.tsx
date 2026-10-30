@@ -175,13 +175,6 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
           <span className="text-xs text-slate-400">
             단축키: <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 font-mono text-[11px]">ESC</kbd> 로 닫기
           </span>
-          <button
-            type="button"
-            onClick={onClose}
-            className="px-4 py-2 text-sm font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
-          >
-            닫기
-          </button>
         </div>
       </div>
     </div>

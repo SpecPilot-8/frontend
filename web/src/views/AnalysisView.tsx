@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import type { StepId, Condition, RequirementItem } from '../types';
 import { useProject } from '../contexts/ProjectContext';
 import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } from '../services/api';
-import { ParsingWarnings } from '../components/ParsingWarnings';
 import { ExtractionLoadingModal } from '../components/ExtractionLoadingModal';
 import { Button, Card, PageHeader } from '../components/common';
 import { SpecPageViewer } from '../components/verification/SpecPageViewer';
@@ -14,12 +13,16 @@ interface Group { id: string; title: string; subtopics: { id: string; title: str
 interface ExtractionJob { id: string; document_id?: string; operation: string; status: string; progress?: { completed: number; total: number }; result?: { requirement_count: number; condition_count: number }; error?: { message: string }; missing_features: { message: string }[] }
 type Req = RequirementItem & { review_reasons?: string[]; revision: number; document_id: string; document_revision: number; source_refs: { block_id: string; quote: string }[] };
 const categoryLabels = { display: '화면 표시', validation: '입력 검사', navigation: '화면 이동', business_logic: '비즈니스 로직', data: '데이터 저장', error_message: '오류 메시지' };
+// 구현 위치·검증 방식은 화면에 한국어로 보여준다. 'unknown'(미지정)은 표시하지 않는다
+const targetLabels: Record<string, string> = { frontend: '화면(프론트엔드)', backend: '서버(백엔드)', both: '화면+서버' };
+const verifiableLabels: Record<string, string> = { code: '코드로 확인', not_statically_verifiable: '실행해서 확인' };
+const conditionMeta = (c: Condition) => [categoryLabels[c.category], targetLabels[c.target], verifiableLabels[c.verifiable]].filter(Boolean).join(' · ');
 const field = 'w-full border border-slate-200 rounded-lg p-2 text-sm bg-white';
 type Ref = { block_id?: string; quote?: string; location?: { index?: number; bbox?: number[] } };
 // PDF 미리보기에 띄울 출처 하나. bbox가 없으면 quote로 페이지 텍스트에서 위치를 찾는다
 interface PdfTarget { key: string; page: number; bbox?: number[]; quote?: string; label: string; blockId?: string }
 const blockLabel = (b: Block) => `${b.structure.section}${b.structure.label ? ` [${b.structure.label}]` : ''}`;
-const blankCondition = (): Condition => ({ stable_key: crypto.randomUUID(), text: '', category: 'business_logic', target: 'unknown', verifiable: 'code', source_refs: [] });
+const blankCondition = (): Condition => ({ stable_key: crypto.randomUUID(), text: '', category: 'business_logic', target: 'frontend', verifiable: 'code', source_refs: [] });
 
 export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> = ({ onNavigateStep }) => {
   const { projectId, setUnsavedChanges, saveBeforeLeaveRef, analysisTarget, setAnalysisTarget } = useProject();
@@ -42,7 +45,6 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   const [message, setMessage] = useState('');
   const [activeJobId, setActiveJobId] = useState('');
   const [extractProgress, setExtractProgress] = useState<{ completed: number; total: number } | null>(null);
-  const [acknowledgedFor, setAcknowledgedFor] = useState('');
   const [selectedPageFilter, setSelectedPageFilter] = useState<string>('all');
   const [checkedReqIds, setCheckedReqIds] = useState<Set<string>>(new Set());
   const [pdfTarget, setPdfTarget] = useState<PdfTarget | null>(null);
@@ -50,8 +52,6 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   const document = docs.find(d => d.id === docId);
   const source = blocks.find(b => b.id === blockId);
   const base = `/projects/${projectId}`;
-  const warningKey = `${docId}:${document?.revision}:${document?.parser_version}`;
-  const warningAccepted = !document?.warnings?.length || acknowledgedFor === warningKey;
 
   const load = useCallback(async () => {
     if (!projectId || !docId) return;
@@ -117,7 +117,8 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
 
   const groupName = useCallback((r: Req) => {
     const t = groups.find(g => g.subtopics.some(s => s.id === r.subtopic_id));
-    return `${t?.title || '미분류'} - ${t?.subtopics.find(s => s.id === r.subtopic_id)?.title || '기능 확인 필요'}`;
+    // 소주제는 화면에서 '향후 개선 계획'으로 부른다
+    return `${t?.title || '미분류'} - ${t?.subtopics.find(s => s.id === r.subtopic_id)?.title || '향후 개선 계획 확인 필요'}`;
   }, [groups]);
   const startEdit = (fresh: boolean) => {
     setIsNew(fresh); setTitle(fresh ? '' : selected?.title || '');
@@ -149,7 +150,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   useEffect(()=>{saveBeforeLeaveRef.current=editing?save:null;return()=>{saveBeforeLeaveRef.current=null;};},[saveBeforeLeaveRef,save,editing]);
   const parse = async () => {
     if (!document) return;
-    setBusy(true); setAcknowledgedFor(''); setMessage('문서의 화면 표와 원문을 읽고 있습니다.');
+    setBusy(true); setMessage('문서의 화면 표와 원문을 읽고 있습니다.');
     try {
       const job = await api<{ id: string }>(`${base}/documents/${docId}/parse`, jsonRequest('POST', { document_revision: document.revision, force: blocks.length > 0 }));
       const result = await pollJobStatus(projectId!, job.id) as { status: string };
@@ -157,13 +158,14 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     } catch (e) { setMessage(errorMessage(e)); } finally { setBusy(false); }
   };
   const extract = async () => {
-    if (!document || !warningAccepted) return;
+    if (!document) return;
     setBusy(true); setMessage('서버 모델로 요구사항 추출을 준비하고 있습니다.');
     try {
       const config = await api<{ config_version: number; connection_status: string }>(`${base}/llm`);
       if (config.connection_status !== 'connected') throw new Error('프로젝트 설정에서 실제 모델 연결을 먼저 확인해주세요.');
       const job = await api<ExtractionJob>(`${base}/documents/${docId}/requirements/extract`, jsonRequest('POST', {
-        document_revision: document.revision, model_config_version: config.config_version, accept_warnings: warningAccepted,
+        document_revision: document.revision, model_config_version: config.config_version, // 경고 확인 체크박스 없이 진행한다. 파싱 경고는 화면 상단 안내로만 보여주고, 서버의 partial 문서 확인 조건은 여기서 함께 보낸다
+        accept_warnings: true,
       }));
       if (['queued', 'running'].includes(job.status)) setActiveJobId(job.id);
       else { setMessage(job.error?.message || job.missing_features?.map(f => f.message).join(' / ') || `분석 상태: ${job.status}`); setBusy(false); }
@@ -178,33 +180,6 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   };
 
   const unapprovedReqs = useMemo(() => reqs.filter(r => r.review_status !== 'approved'), [reqs]);
-
-  const approveAll = async () => {
-    if (!unapprovedReqs.length || editing || busy) return;
-    if (!window.confirm(`선택한 문서의 미확정 요구사항 ${unapprovedReqs.length}개를 원문과 대조하셨나요? 확인한 내용을 모두 검토 확정합니다.`)) return;
-    setBusy(true);
-    setMessage(`요구사항 ${unapprovedReqs.length}개를 검토 확정하고 있습니다...`);
-    let approved = 0;
-    try {
-      try {
-        await api(`${base}/requirements/review-all`, jsonRequest('POST', {}));
-        approved = unapprovedReqs.length;
-      } catch {
-        for (const req of unapprovedReqs) {
-          await api(`${base}/requirements/${req.id}/review`, jsonRequest('PUT', { base_revision: req.revision, status: 'approved' }));
-          approved += 1;
-        }
-      }
-      await load();
-      setCheckedReqIds(new Set());
-      setMessage(`이 문서의 요구사항 ${approved}개를 검토 확정했습니다.`);
-    } catch (err) {
-      await load().catch(() => undefined);
-      setMessage(`${approved}개 저장 후 중단했습니다. 남은 미확정 항목을 확인하세요. ${errorMessage(err)}`);
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const visibleReqs = useMemo(() => {
     return reqs.filter(r => `${r.title} ${groupName(r)}`.includes(search));
@@ -331,7 +306,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
   }, [selected, refTarget]);
   // 직접 고른 출처가 없으면: 편집 중엔 선택한 원문 블록, 아니면 선택한 요구사항의 첫 출처
   const activeTarget: PdfTarget | null = pdfTarget
-    ?? (editing ? (source ? blockTarget(source) : null) : selectedRefs[0] ?? (source ? blockTarget(source) : null));
+    ?? (editing && isNew ? (source ? blockTarget(source) : null) : selectedRefs[0] ?? (source ? blockTarget(source) : null));
   const pageHighlights: PageHighlight[] = useMemo(() => {
     if (!activeTarget) return [];
     const seen = new Set<string>();
@@ -371,7 +346,6 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
     blocks.length > 0 &&
     !busy &&
     !editing &&
-    warningAccepted &&
     reqs.length === 0 &&
     document?.parser_version === 'pdf-layout-2'
   );
@@ -388,7 +362,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
       <PageHeader
         stepTag="02 / REQUIREMENT ANALYSIS"
         title="명세 분석"
-        description="원문에서 요구사항을 검토하고 주제·소주제별로 수락 조건을 확정합니다."
+        description="향후 개선 계획"
         action={
           <Button
             variant={reqs.length > 0 ? "primary" : "secondary"}
@@ -443,7 +417,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
-                원문 {blocks.length}개 블록 파싱 완료
+                파싱 완료
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-amber-700 bg-amber-50 px-2.5 py-1 rounded-full border border-amber-200/60">
@@ -451,24 +425,6 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
               </span>
             )}
 
-            {reqs.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200/60">
-                  요구사항 {reqs.length}개 ({reqs.filter(r => r.review_status === 'approved').length}개 확정)
-                </span>
-                {unapprovedReqs.length > 0 && (
-                  <button
-                    type="button"
-                    onClick={approveAll}
-                    disabled={busy || editing}
-                    className="text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 shadow-2xs px-3 py-1 rounded-full transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
-                    title="미확정 요구사항을 한 번에 모두 확정합니다"
-                  >
-                    <span>미확정 {unapprovedReqs.length}개 전체 검토 확정</span>
-                  </button>
-                )}
-              </div>
-            )}
           </div>
 
           {/* 파이프라인 단계 인디케이터 */}
@@ -533,8 +489,8 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
                   ? "먼저 문서 파싱을 실행하세요"
                   : reqs.length > 0
                     ? "요구사항이 이미 등록되었습니다"
-                    : !warningAccepted
-                      ? "하단의 OCR/표 경고 확인 체크박스를 선택하세요"
+                    : document?.parser_version !== 'pdf-layout-2'
+                      ? "이전 방식으로 읽은 문서입니다. 문서를 다시 파싱하세요"
                       : "AI가 화면별 명세에서 요구사항과 수락 조건을 자동 추출합니다"
               }
             >
@@ -564,10 +520,10 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
             {blocks.length === 0 && (
               <span className="text-blue-600 font-medium">먼저 [문서 파싱 시작]을 클릭하세요.</span>
             )}
-            {blocks.length > 0 && reqs.length === 0 && !warningAccepted && (
-              <span className="text-amber-700 font-medium">아래 경고 확인 체크박스를 선택하면 AI 추출이 활성화됩니다.</span>
+            {blocks.length > 0 && reqs.length === 0 && document?.parser_version !== 'pdf-layout-2' && (
+              <span className="text-amber-700 font-medium">문서를 다시 파싱해야 AI 추출을 할 수 있습니다.</span>
             )}
-            {blocks.length > 0 && reqs.length === 0 && warningAccepted && (
+            {blocks.length > 0 && reqs.length === 0 && document?.parser_version === 'pdf-layout-2' && (
               <span className="text-indigo-600 font-medium animate-pulse">준비 완료: [AI 요구사항 추출]을 클릭하세요.</span>
             )}
             {reqs.length > 0 && (
@@ -576,14 +532,12 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
           </div>
         </div>
       </div>
-    {reviewFocus && selected?.id === reviewFocus.requirementId && <p className="p-3 rounded bg-slate-100 text-sm">검증에서 선택한 요구사항입니다. 판정 기준은 개정 {reviewFocus.revision}이며, 여기서는 현재 개정 {selected.revision}을 검토합니다. 수정 내용은 새 검증 실행부터 반영됩니다.</p>}
+    {reviewFocus && selected?.id === reviewFocus.requirementId && <p className="p-3 rounded bg-slate-100 text-sm">검증 결과에서 선택한 요구사항입니다. 수정한 내용은 다음 코드 검증부터 반영됩니다.</p>}
     {document && blocks.length > 0 && <p className="text-sm text-slate-600">원문 {blocks.length}개 블록을 읽었습니다. {document.parse_status === 'partial' ? '일부 항목은 원문 확인이 필요합니다.' : '문서 읽기를 마쳤습니다.'}</p>}
     {reqs.length > 0 && <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">저장된 요구사항 {reqs.length}개 · 수락 조건 {reqs.reduce((sum, r) => sum + r.conditions.length, 0)}개. 원문과 비교한 뒤 검토를 확정하세요.</p>}
     {document?.parser_version && document.parser_version !== 'pdf-layout-2' && <p className="text-sm text-amber-800">이전 OCR 결과입니다. 한국어 OCR 설정을 적용한 뒤 ‘문서 다시 파싱’을 눌러주세요. 저장된 요구사항이 있다면 새 문서로 등록해야 합니다.</p>}
-    {document?.warnings?.length ? <ParsingWarnings warnings={document.warnings} fileUrl={`${BASE_URL}${base}/documents/${docId}/file`} /> : null}
     {document && blocks.length > 0 && reqs.length === 0 && <div className="rounded-lg border border-slate-200 bg-white p-3 space-y-2 text-sm">
       <p>서버 모델로 {document.screens?.length || 0}개 화면의 원문을 순서대로 분석합니다. 화면마다 모델 호출 비용이 발생하며 결과는 검토 전 초안으로 저장합니다.</p>
-      {document.warnings.length > 0 && <label className="flex items-center gap-2"><input type="checkbox" checked={warningAccepted} disabled={busy} onChange={e => setAcknowledgedFor(e.target.checked ? warningKey : '')} />OCR·표 경고와 원문을 확인했으며 이 결과로 요구사항 추출을 진행합니다.</label>}
     </div>}
     <div className="grid xl:grid-cols-[320px_1fr] gap-5">
       <Card title="문서 원문" description={`${blocks.length}개 블록`}>
@@ -648,7 +602,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
           </div>
         </div>
 
-        {source && <><p className="text-sm whitespace-pre-wrap my-4 select-text bg-slate-50 p-2.5 rounded border border-slate-100">{source.text}</p><a className="text-blue-600 text-sm font-medium hover:underline inline-block mb-3" target="_blank" rel="noreferrer" href={`${BASE_URL}${base}/documents/${docId}/file#page=${source.location.index}`}>PDF {source.location.index}쪽 원문 열기 ↗</a></>}
+        {source && <><p className="text-sm whitespace-pre-wrap my-4 select-text bg-slate-50 p-2.5 rounded border border-slate-100">{source.text}</p></>}
 
         <hr className="my-3 border-slate-100" />
 
@@ -730,19 +684,17 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
         <div className="min-w-0">
         {editing ? <form onSubmit={save} className="space-y-3">
           <label className="block">주제<input aria-label="주제" required maxLength={200} className={field} value={topic} onChange={e => setTopic(e.target.value)} /></label>
-          <label className="block">소주제<input aria-label="소주제" required maxLength={200} className={field} value={subtopic} onChange={e => setSubtopic(e.target.value)} /></label>
+          <label className="block">향후 개선 계획<input aria-label="향후 개선 계획" required maxLength={200} className={field} value={subtopic} onChange={e => setSubtopic(e.target.value)} /></label>
           <label className="block">요구사항 이름<input aria-label="요구사항 이름" required maxLength={300} className={field} value={title} onChange={e => setTitle(e.target.value)} /></label>
-          {conditions.map((c,i) => <fieldset className="border rounded p-3 space-y-2" key={c.stable_key}><legend>수락 조건 {i+1}</legend>
+          {conditions.map((c,i) => <fieldset className="border rounded p-3 space-y-2" key={c.stable_key}><legend className="px-1">수락 조건 {i+1}{conditions.length > 1 && <button type="button" className="ml-2 text-xs text-slate-400 hover:text-rose-600 cursor-pointer" onClick={() => setConditions(prev => prev.filter((_,n) => n!==i))}>삭제</button>}</legend>
             <textarea aria-label={`조건 ${i+1}`} required className={field} value={c.text} onChange={e => setConditions(prev => prev.map((x,n) => n===i ? {...x,text:e.target.value}:x))} />
-            <div className="flex gap-2"><select aria-label={`조건 ${i+1} 범주`} className={field} value={c.category} onChange={e => setConditions(prev => prev.map((x,n) => n===i ? {...x,category:e.target.value as Condition['category']}:x))}>{Object.entries(categoryLabels).map(([k,v]) => <option key={k} value={k}>{v}</option>)}</select>
-            <select aria-label={`조건 ${i+1} 구현 위치`} className={field} value={c.target} onChange={e => setConditions(prev => prev.map((x,n) => n===i ? {...x,target:e.target.value as Condition['target']}:x))}>{['unknown','frontend','backend','both'].map(k => <option key={k} value={k}>{k}</option>)}</select>
-            <select aria-label={`조건 ${i+1} 검증 가능 여부`} className={field} value={c.verifiable} onChange={e => setConditions(prev => prev.map((x,n) => n===i ? {...x,verifiable:e.target.value as Condition['verifiable']}:x))}><option value="code">코드로 검증</option><option value="not_statically_verifiable">실행 확인 필요</option></select>
-            <Button type="button" variant="ghost" disabled={conditions.length===1} onClick={() => setConditions(prev => prev.filter((_,n) => n!==i))}>삭제</Button></div>
+            <div className="flex flex-wrap gap-2"><label className="flex-1 min-w-32 text-[11px] font-semibold text-slate-500">범주<select aria-label={`조건 ${i+1} 범주`} className={field} value={c.category} onChange={e => setConditions(prev => prev.map((x,n) => n===i ? {...x,category:e.target.value as Condition['category']}:x))}>{Object.entries(categoryLabels).map(([k,v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+            <label className="flex-1 min-w-32 text-[11px] font-semibold text-slate-500">구현 위치<select aria-label={`조건 ${i+1} 구현 위치`} className={field} value={c.target} onChange={e => setConditions(prev => prev.map((x,n) => n===i ? {...x,target:e.target.value as Condition['target']}:x))}>{c.target === 'unknown' && <option value="unknown" disabled hidden>구현 위치 선택</option>}{Object.entries(targetLabels).map(([k,v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+            <label className="flex-1 min-w-32 text-[11px] font-semibold text-slate-500">확인 방법<select aria-label={`조건 ${i+1} 검증 가능 여부`} className={field} value={c.verifiable} onChange={e => setConditions(prev => prev.map((x,n) => n===i ? {...x,verifiable:e.target.value as Condition['verifiable']}:x))}>{Object.entries(verifiableLabels).map(([k,v]) => <option key={k} value={k}>{v}</option>)}</select></label></div>
           </fieldset>)}
           <div className="flex gap-2"><Button type="button" variant="secondary" disabled={busy} onClick={() => setConditions(prev => [...prev,blankCondition()])}>조건 추가</Button><Button type="submit" disabled={busy}>저장</Button><Button type="button" variant="secondary" disabled={busy} onClick={() => {setEditing(false);setUnsavedChanges(false);}}>취소</Button></div>
         </form> : selected ? <div className="space-y-4">
           <p className="text-xs font-semibold text-slate-500">{groupName(selected)} · 개정 {selected.revision}</p>
-          <p className="whitespace-pre-wrap select-text text-sm bg-slate-50 p-3 rounded-lg border border-slate-100">{selected.original_text || '원문 출처 없음: 사용자가 수동 작성한 항목입니다.'}</p>
           {selectedRefs.some(t => t.key.startsWith('req:')) && <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[11px] font-semibold text-slate-500">원문 위치</span>
             {selectedRefs.filter(t => t.key.startsWith('req:')).map(refButton)}
@@ -750,7 +702,7 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
           {selected.review_reasons?.length ? <ul className="text-sm text-amber-800 list-disc pl-5 bg-amber-50/60 p-2.5 rounded-lg border border-amber-100">{selected.review_reasons.map((reason, i) => <li key={i}>{reason}</li>)}</ul> : null}
           <div className="space-y-2">
             <h4 className="text-xs font-bold text-slate-700">수락 조건 ({selected.conditions.length}개)</h4>
-            {selected.conditions.map(c => <div key={c.id || c.stable_key} className="border rounded-lg p-3 text-sm bg-white shadow-xs"><small className="text-blue-700 font-semibold">{categoryLabels[c.category]} · {c.target} · {c.verifiable}</small><p className="mt-1 text-slate-800">{c.text}</p>{(() => { const refs = selectedRefs.filter(t => t.key.startsWith(`cond:${c.id || c.stable_key}:`)); return refs.length ? <div className="flex flex-wrap gap-1.5 mt-2">{refs.map(refButton)}</div> : null; })()}</div>)}
+            {selected.conditions.map(c => <div key={c.id || c.stable_key} className="border rounded-lg p-3 text-sm bg-white shadow-xs"><small className="text-blue-700 font-semibold">{conditionMeta(c)}</small><p className="mt-1 text-slate-800">{c.text}</p>{(() => { const refs = selectedRefs.filter(t => t.key.startsWith(`cond:${c.id || c.stable_key}:`)); return refs.length ? <div className="flex flex-wrap gap-1.5 mt-2">{refs.map(refButton)}</div> : null; })()}</div>)}
           </div>
           <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
             <Button onClick={() => startEdit(false)} disabled={busy} variant="secondary">요구사항 편집</Button>
@@ -762,12 +714,9 @@ export const AnalysisView: React.FC<{ onNavigateStep: (step: StepId) => void }> 
         </div>
         <section aria-label="기획서 원본 위치" className="min-w-0 lg:sticky lg:top-0 space-y-2">
           <h4 className="text-xs font-bold text-slate-700">
-            기획서 원본{activeTarget ? ` · ${activeTarget.page}쪽${screenMap[activeTarget.page] || ''}` : ''}
+            기획서 원본{activeTarget ? ` · ${activeTarget.page}쪽` : ''}
           </h4>
           {activeTarget && document ? <>
-            <p className="text-[11px] text-slate-600 bg-amber-50/70 border border-amber-100 rounded px-2 py-1 line-clamp-3 select-text">
-              <span className="font-semibold text-amber-800">{activeTarget.label}</span>{activeTarget.quote ? ` · ${activeTarget.quote}` : ''}
-            </p>
             <SpecPageViewer
               fileUrl={`${BASE_URL}${base}/documents/${docId}/file`}
               page={activeTarget.page}

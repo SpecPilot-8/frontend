@@ -27,7 +27,6 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [activeJob, setActiveJob] = useState('');
-  const [cancellingJob, setCancellingJob] = useState(false);
   const [verifyProgress, setVerifyProgress] = useState<{ completed: number; total: number; stage?: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
   const [scopeOptions, setScopeOptions] = useState<ScopeOptions | null>(null);
@@ -37,7 +36,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   const load = useCallback(async () => {
     if (!projectId) return;
     const [items, jobs] = await Promise.all([fetchAll<Run>(`/projects/${projectId}/verification-runs`), fetchAll<Job>(`/projects/${projectId}/jobs`)]);
-    items.reverse(); setRuns(items); setRunId(prev => items.some(r => r.id === prev) ? prev : items[0]?.id || '');
+    items.reverse(); setRuns(items); setRunId(items[0]?.id || '');
     const pending = jobs.find(j => j.operation === 'verify' && ['queued', 'running'].includes(j.status));
     if (pending) { setActiveJob(pending.id); if (pending.result_ref) setRunId(pending.result_ref.id); }
   }, [projectId]);
@@ -58,18 +57,17 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     void Promise.resolve().then(async () => {
       setBusy(true);
       try {
-        const done = await pollJobStatus(projectId, activeJob, job => {
+        await pollJobStatus(projectId, activeJob, job => {
           if (!active) return;
           const progress = job.progress;
           setVerifyProgress(progress || null);
           setMessage(progress ? `${stages[progress.stage] || progress.stage} · 요구사항 ${progress.completed}/${progress.total}` : '코드 검증 대기 중');
           const stamp = JSON.stringify(progress);
           if (stamp !== lastProgress) { lastProgress = stamp; setRefresh(n => n + 1); }
-        }) as Job;
+        });
         if (!active) return;
         await load(); setRefresh(n => n + 1);
-        setMessage(done.status === 'completed' ? '조건별 코드 판정을 완료했습니다. 추적표와 원문·코드 근거를 확인하세요. 실제 실행 테스트 결과와는 구분됩니다.'
-          : done.error?.message || done.missing_features?.map(f => f.message).join(' / ') || `검증 상태: ${done.status}`);
+        setMessage('');
       } catch (e) { if (active) setMessage(errorMessage(e)); }
       finally { if (active) { setBusy(false); setActiveJob(''); setVerifyProgress(null); } }
     });
@@ -121,12 +119,8 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       setScopeOptions(null); setPendingInput(null); setSelected(null); setSearch(''); setFilter('');
       await load();
       if (job.result_ref) setRunId(job.result_ref.id);
-      if (['queued', 'running'].includes(job.status)) {
-        setActiveJob(job.id);
-      } else {
-        setMessage(job.error?.message || job.missing_features?.map(f => f.message).join(' / ') || '검증 실패');
-        setBusy(false);
-      }
+      if (['queued', 'running'].includes(job.status)) setActiveJob(job.id);
+      else { setMessage(''); setBusy(false); setRefresh(n => n + 1); }
     } catch (e) {
       setMessage(errorMessage(e));
       setBusy(false);
@@ -147,25 +141,6 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     }
   };
 
-  const cancelActiveJob = async () => {
-    if (!projectId || !activeJob || cancellingJob) return;
-    if (!window.confirm('진행 중인 코드 정합성 검증 작업을 중단하시겠습니까?')) return;
-    setCancellingJob(true);
-    try {
-      await api(`${base}/jobs/${activeJob}/cancel`, jsonRequest('POST', {}));
-      setMessage('코드 검증 작업을 사용자가 중단했습니다.');
-      setActiveJob('');
-      setVerifyProgress(null);
-      await load();
-      setRefresh(n => n + 1);
-    } catch (e) {
-      setMessage(`작업 중단 실패: ${errorMessage(e)}`);
-    } finally {
-      setCancellingJob(false);
-      setBusy(false);
-    }
-  };
-
   const start = async (scope: VerificationScope) => {
     if (!pendingInput) return;
     setBusy(true); setMessage('검증 작업을 접수하고 있습니다.');
@@ -174,32 +149,30 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       setScopeOptions(null); setPendingInput(null); setSelected(null); setSearch(''); setFilter('');
       await load(); if (job.result_ref) setRunId(job.result_ref.id);
       if (['queued', 'running'].includes(job.status)) setActiveJob(job.id);
-      else { setMessage(job.error?.message || job.missing_features.map(f => f.message).join(' / ')); setBusy(false); }
+      else { setMessage(''); setBusy(false); setRefresh(n => n + 1); }
     } catch (e) { setMessage(errorMessage(e)); setBusy(false); }
   };
   const exportTrace = async () => {
     setBusy(true);
     try {
       const job = await api<{ id: string }>(`${base}/exports/traceability`, jsonRequest('POST', { verification_run_id: runId, format: 'xlsx' }));
-      const done = await pollJobStatus(projectId!, job.id) as { status: string; result_ref?: { id: string } };
-      if (done.status !== 'completed' || !done.result_ref) throw new Error(`내보내기 상태: ${done.status}`);
+      const done = await pollJobStatus(projectId!, job.id) as { result_ref?: { id: string } };
+      if (!done.result_ref) throw new Error('Excel 파일을 만들지 못했습니다.');
       const response = await fetch(`${BASE_URL}${base}/artifacts/${done.result_ref.id}/download`);
       if (!response.ok) throw new Error('다운로드에 실패했습니다.');
       const url = URL.createObjectURL(await response.blob()); const link = document.createElement('a'); link.href = url; link.download = '요구사항-추적표.xlsx'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) { setMessage(errorMessage(e)); } finally { setBusy(false); }
   };
   if (!projectId) return <Button onClick={() => onNavigateStep('SETUP')}>프로젝트를 선택하세요</Button>;
-  if (selected) return <VerificationDetail requirementId={selected.requirement_id} requirementRevision={selected.requirement_revision} runId={runId} onBack={() => setSelected(null)} onNavigateStep={onNavigateStep} onSelectForTest={() => onSelectRequirementForTest?.(selected.requirement_id)} />;
+  if (selected) return <VerificationDetail requirementId={selected.requirement_id} runId={runId} onBack={() => setSelected(null)} onNavigateStep={onNavigateStep} onSelectForTest={() => onSelectRequirementForTest?.(selected.requirement_id)} />;
   const run = runs.find(r => r.id === runId);
   return <div className="max-w-7xl mx-auto space-y-5">
     <VerificationLoadingModal
       isOpen={!!activeJob}
       progress={verifyProgress}
       stageText={verifyProgress?.stage ? stages[verifyProgress.stage] || verifyProgress.stage : undefined}
-      onCancel={cancelActiveJob}
-      cancelling={cancellingJob}
     />
-    <PageHeader stepTag="03 / VERIFICATION" title="검증 결과" description="선택한 실행의 요구사항 개정·코드 스냅샷을 기준으로 판정과 근거를 확인합니다." />
+    <PageHeader stepTag="03 / VERIFICATION" title="검증 결과" description="요구사항별 코드 구현 판정과 근거를 확인합니다." />
     {message && <p role="status" className="p-3 bg-blue-50 rounded text-sm">{message}</p>}
     {scopeOptions && <VerificationScopeDialog options={scopeOptions} busy={busy} onCancel={() => { setScopeOptions(null); setPendingInput(null); setMessage('검증 설정을 취소했습니다. 모델을 호출하지 않았습니다.'); }} onRun={start} />}
     <div className="flex flex-wrap items-center gap-2">
@@ -213,15 +186,12 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       >
         진입 파일 수동 지정 (고급)
       </button>
-      <Button variant="secondary" onClick={() => onNavigateStep('ANALYSIS')}>명세 검토로 이동</Button>
-      <Button variant="secondary" onClick={() => onNavigateStep('SETUP')}>모델·코드 설정</Button>
-      <Button variant="secondary" onClick={() => onNavigateStep('TEST_SPEC')}>테스트 사양서로 이동</Button>
     </div>
-    <Card title="요구사항 추적표" description={run ? `실행 상태: ${run.status} · 스냅샷 ${run.snapshot_id}` : '아직 검증 실행이 없습니다'}>
-      <div className="flex flex-wrap gap-3 mb-4"><select aria-label="검증 실행 선택" value={runId} disabled={busy} onChange={e => { setRunId(e.target.value); setMessage(''); }} className="border rounded p-2 max-w-sm">{runs.map(r => <option key={r.id} value={r.id}>{r.created_at} · {r.status}</option>)}</select><input aria-label="추적표 검색" placeholder="기능·주제 검색" value={search} onChange={e => setSearch(e.target.value)} className="border rounded p-2" /><select aria-label="판정 필터" value={filter} onChange={e => setFilter(e.target.value)} className="border rounded p-2"><option value="">전체</option>{Object.entries(labels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select><Button disabled={!runId || busy} onClick={exportTrace}>실행 전체 Excel 출력</Button></div>
-      <p className="text-xs text-slate-500 mb-3">Excel은 현재 검색·필터와 관계없이 선택한 검증 실행 전체를 출력합니다.</p>
+    <Card title="요구사항 추적표" description={run ? `최근 검증 · ${run.created_at.replace('T', ' ').slice(0, 16)}` : '아직 검증 결과가 없습니다'}>
+      <div className="flex flex-wrap gap-3 mb-4"><input aria-label="추적표 검색" placeholder="기능·주제 검색" value={search} onChange={e => setSearch(e.target.value)} className="border rounded p-2" /><select aria-label="판정 필터" value={filter} onChange={e => setFilter(e.target.value)} className="border rounded p-2"><option value="">전체</option>{Object.entries(labels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select><Button disabled={!runId || busy} onClick={exportTrace}>Excel 출력</Button></div>
+      <p className="text-xs text-slate-500 mb-3">Excel은 검색·필터와 관계없이 전체 결과를 출력합니다.</p>
       <p className="text-sm mb-4">선택 범위 {summary.total || 0}건 · 구현됨 {summary.implemented || 0}건 · 구현율 {(summary.implementation_rate || 0).toFixed(1)}% · 미분석 {summary.not_run || 0}건</p>
-      <div className="overflow-auto"><table className="w-full text-sm text-left"><thead><tr>{['주제 / 소주제', '기능명', '판정', '근거', '사유', '상세'].map(v => <th className="p-3 border-b" key={v}>{v}</th>)}</tr></thead><tbody>{rows.map(r => <tr key={r.requirement_id}><td className="p-3 border-b">{r.topic_title} / {r.subtopic_title}</td><td className="p-3 border-b">{r.title}<small className="block">개정 {r.requirement_revision}</small></td><td className="p-3 border-b">{labels[r.status || 'not_run']}<small className="block">{r.analysis_state}</small></td><td className="p-3 border-b">{r.evidence_count}곳</td><td className="p-3 border-b">{r.reason}</td><td className="p-3 border-b"><Button onClick={() => setSelected(r)}>상세 보기</Button></td></tr>)}</tbody></table>{!rows.length && <p className="p-4 text-sm text-slate-500">현재 선택 범위의 요구사항이 없습니다.</p>}</div>
+      <div className="overflow-auto"><table className="w-full text-sm text-left"><thead><tr>{['주제 / 향후 개선 계획', '기능명', '판정', '근거', '사유', '상세'].map(v => <th className="p-3 border-b" key={v}>{v}</th>)}</tr></thead><tbody>{rows.map(r => <tr key={r.requirement_id}><td className="p-3 border-b">{r.topic_title} / {r.subtopic_title}</td><td className="p-3 border-b">{r.title}</td><td className="p-3 border-b">{labels[r.status || 'not_run']}</td><td className="p-3 border-b">{r.evidence_count}곳</td><td className="p-3 border-b">{r.reason}</td><td className="p-3 border-b"><Button onClick={() => setSelected(r)}>상세 보기</Button></td></tr>)}</tbody></table>{!rows.length && <p className="p-4 text-sm text-slate-500">현재 선택 범위의 요구사항이 없습니다.</p>}</div>
     </Card>
   </div>;
 };

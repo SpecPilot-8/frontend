@@ -9,7 +9,6 @@ import type { StepId } from "../../types";
 
 interface VerificationDetailProps {
   requirementId: string;
-  requirementRevision: number;
   runId: string;
   onSelectForTest?: () => void;
   onBack: () => void;
@@ -57,7 +56,7 @@ interface VerificationDetailData {
 
 export const VerificationDetail: React.FC<VerificationDetailProps> = ({
   requirementId,
-  requirementRevision, runId, onSelectForTest,
+  runId, onSelectForTest,
   onBack,
   onNavigateStep,
 }) => {
@@ -80,7 +79,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
       setIsLoading(true);
       try {
         const [req, detailData] = await Promise.all([
-          api<Requirement>(`/projects/${projectId}/requirements/${requirementId}?revision=${requirementRevision}`),
+          api<Requirement>(`/projects/${projectId}/requirements/${requirementId}`),
           api<VerificationDetailData>(`/projects/${projectId}/verification-runs/${runId}/requirements/${requirementId}`),
         ]);
         setRequirement(req); setVerificationData(detailData);
@@ -93,7 +92,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
       }
     };
     fetchData();
-  }, [projectId, requirementId, requirementRevision, runId]);
+  }, [projectId, requirementId, runId]);
 
   const toggleEvidence = (id: string) => {
     const newSet = new Set(openEvidenceIds);
@@ -151,7 +150,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
       </div>
 
       <div className="flex flex-col xl:flex-row gap-6 items-start min-w-0">
-        <RequirementPanel projectId={projectId || ""} requirement={requirement} verificationData={verificationData} onReview={() => { setAnalysisTarget({ requirementId, documentId: requirement.document_id || "", revision: requirementRevision }); onNavigateStep("ANALYSIS"); }} />
+        <RequirementPanel projectId={projectId || ""} requirement={requirement} verificationData={verificationData} onReview={() => { setAnalysisTarget({ requirementId, documentId: requirement.document_id || "" }); onNavigateStep("ANALYSIS"); }} />
 
         <div className="flex-1 min-w-0 bg-white rounded-xl border border-slate-200/80 shadow-sm p-6 w-full">
           <div className="flex flex-wrap justify-between items-end gap-3 mb-6 border-b border-slate-100 pb-4">
@@ -260,20 +259,6 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                         >
                           코드 스니펫 (L{ev.start_line}~L{ev.end_line})
                         </p>
-                        <button
-                          type="button"
-                          onClick={() => setModalEvidence({
-                            ...ev,
-                            scope: ev.scope || (ev.role === 'problem' ? 'this_screen' : 'other_screen'),
-                          })}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
-                          title="팝업창으로 코드 크게 보기"
-                        >
-                          <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-                          </svg>
-                          <span>팝업으로 크게 보기</span>
-                        </button>
                       </div>
 
                       <div

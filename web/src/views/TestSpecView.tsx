@@ -1,16 +1,13 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import type { StepId } from '../types';
+import type { StepId, RequirementItem } from '../types';
 import type { TestCase, TestExecution, TestSpecification, TestStep, StepResult } from '../types/test';
 import { useProject } from '../contexts/ProjectContext';
 import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } from '../services/api';
 import { Button, Card, PageHeader } from '../components/common';
 import { TestSpecLoadingModal } from '../components/test/TestSpecLoadingModal';
-import { TestEvidenceDialog } from '../components/test/TestEvidenceDialog';
-import type { TestRequirement } from '../services/testEvidence';
-import type { RequirementLink } from '../types/test';
 
 type Spec = TestSpecification & { requirement_versions: {requirement_id:string;revision:number}[] };
-type Req = TestRequirement & {subtopic_id:string};
+type Req = RequirementItem & {revision:number;subtopic_id:string};
 interface Run {id:string;created_at:string;status:string;requirement_versions:{requirement_id:string;revision:number}[]}
 interface GenerationJob {id:string;operation:string;status:string;progress?:{completed:number;total:number};result_ref?:{id:string};result?:{test_case_count:number;step_count:number};error?:{message:string};missing_features:{message:string}[]}
 interface GenerationPlan {model_config_version:number;requirement_count:number;subtopic_count:number;max_model_calls:number;provider:string;model:string;snapshot_id:string;verification_run_id:string;requirement_ids:string[];runDate:string}
@@ -19,35 +16,7 @@ const inputClass='w-full border border-slate-200 rounded p-2 text-sm bg-white';
 const predictionLabels:Record<string,string>={normal_expected:'정상 예상',failure_expected:'실패 예상',needs_review:'확인 필요',unknown:'미예측'};
 const statusLabels={not_run:'미실행',passed:'통과',failed:'실패',on_hold:'보류'};
 const resultFor=(step_key:string):StepResult=>({step_key,status:'not_run',actual:'',notes:'',performed_at:null});
-const caseTypeLabels={positive:'정상',negative:'오류',boundary:'경계값'};
 const sectionLabels={login:'로그인',signup:'회원가입',password_find:'비밀번호찾기',notice:'공지사항',mypage:'마이페이지',authorization:'권한',general:'기타 기능'};
-
-const formatRunDate = (isoString: string) => {
-  try {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return isoString;
-    const m = d.getMonth() + 1;
-    const day = d.getDate();
-    const h = String(d.getHours()).padStart(2, '0');
-    const min = String(d.getMinutes()).padStart(2, '0');
-    return `${m}월 ${day}일 ${h}:${min}`;
-  } catch {
-    return isoString;
-  }
-};
-
-const runStatusLabel = (status: string) => {
-  switch (status) {
-    case 'completed': return '완료';
-    case 'running': return '분석 중';
-    case 'failed': return '실패';
-    case 'queued': return '대기';
-    case 'blocked': return '미연결';
-    case 'cancelled': return '중단';
-    case 'draft': return '초안';
-    default: return status;
-  }
-};
 
 export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedRequirementId?:string}>=({onNavigateStep,selectedRequirementId})=>{
   const {projectId,setUnsavedChanges,setNavigationLocked,saveBeforeLeaveRef}=useProject();
@@ -59,8 +28,8 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
   const [cases,setCases]=useState<TestCase[]>([]);
   const [requirements,setRequirements]=useState<Req[]>([]);
   const [executions,setExecutions]=useState<Record<string,TestExecution>>({});
+  const [summary,setSummary]=useState<{scenario_summary:Record<string,number>;step_summary:Record<string,number>}|null>(null);
   const [activeId,setActiveId]=useState('');
-  const [evidenceSelection,setEvidenceSelection]=useState<{title:string;links:RequirementLink[]}|null>(null);
   const [filter,setFilter]=useState(selectedRequirementId||'');
   const [drafts,setDrafts]=useState<Record<string,Draft>>({});
   const [editing,setEditing]=useState(false);
@@ -92,16 +61,14 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
   },[projectId]);
   const loadSpecById=useCallback(async(targetId:string)=>{
     if(!projectId||!targetId)return;
-    const [current,items]=await Promise.all([api<Spec>(`/projects/${projectId}/test-specifications/${targetId}`),fetchAll<TestCase>(`/projects/${projectId}/test-cases?test_specification_id=${targetId}`)]);
-    const [reqResults,records]=await Promise.all([
-      Promise.allSettled(current.requirement_versions.map(r=>api<Req>(`/projects/${projectId}/requirements/${r.requirement_id}?revision=${r.revision}`))),
+    const [current,items,stats]=await Promise.all([api<Spec>(`/projects/${projectId}/test-specifications/${targetId}`),fetchAll<TestCase>(`/projects/${projectId}/test-cases?test_specification_id=${targetId}`),api<{scenario_summary:Record<string,number>;step_summary:Record<string,number>}>(`/projects/${projectId}/test-specifications/${targetId}/execution-summary`)]);
+    const [reqs,records]=await Promise.all([
+      Promise.all(current.requirement_versions.map(r=>api<Req>(`/projects/${projectId}/requirements/${r.requirement_id}?revision=${r.revision}`))),
       Promise.all(items.map(c=>fetchAll<TestExecution>(`/projects/${projectId}/test-cases/${c.id}/executions`))),
     ]);
-    const reqs=reqResults.filter(r=>r.status==='fulfilled').map(r=>r.value);
-    if(reqResults.some(r=>r.status==='rejected'))setMessage('연결된 요구사항 일부를 불러오지 못했습니다. 시험 내용은 유지하며, 근거 보기에서 누락된 개정을 표시합니다.');
     const latest:Record<string,TestExecution>={};
     items.forEach((c,i)=>{const e=records[i].filter(e=>e.test_case_revision===c.revision).sort((a,b)=>b.attempt_no-a.attempt_no)[0];if(e)latest[c.id]=e;});
-    setSpecs(prev=>prev.map(s=>s.id===current.id?current:s));setCases(items);setRequirements(reqs);setExecutions(latest);setActiveId(prev=>items.some(c=>c.id===prev)?prev:items[0]?.id||'');setNewReqId(prev=>reqs.some(r=>r.id===prev)?prev:reqs[0]?.id||'');
+    setSpecs(prev=>prev.map(s=>s.id===current.id?current:s));setCases(items);setRequirements(reqs);setExecutions(latest);setSummary(stats);setActiveId(prev=>items.some(c=>c.id===prev)?prev:items[0]?.id||'');setNewReqId(prev=>reqs.some(r=>r.id===prev)?prev:reqs[0]?.id||'');
   },[projectId]);
   const loadSpec=useCallback(()=>loadSpecById(specId),[loadSpecById,specId]);
   useEffect(()=>{void Promise.resolve().then(loadLists).catch(e=>setMessage(errorMessage(e)));},[loadLists]);
@@ -134,11 +101,11 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
           const job=await api<GenerationJob>(`/projects/${projectId}/jobs/${generationJobId}`,{signal:controller.signal});
           if(!active)return;
           if(job.progress) setGenerationProgress(job.progress);
-          setMessage(`AI 테스트케이스 생성 ${job.status==='queued'?'대기 중':'진행 중'} · 소주제 ${job.progress?.completed||0}/${job.progress?.total||0}`);
+          setMessage(`AI 테스트케이스 생성 ${job.status==='queued'?'대기 중':'진행 중'} · 향후 개선 계획 ${job.progress?.completed||0}/${job.progress?.total||0}`);
           if(['completed','failed','blocked','cancelled'].includes(job.status)){
             await loadLists();if(!active)return;
             if(job.status==='completed'&&job.result_ref){
-              setCases([]);setRequirements([]);setExecutions({});setActiveId('');setFilter('');setSpecId(job.result_ref.id);await loadSpecById(job.result_ref.id);if(!active)return;
+              setCases([]);setSummary(null);setRequirements([]);setExecutions({});setActiveId('');setFilter('');setSpecId(job.result_ref.id);await loadSpecById(job.result_ref.id);if(!active)return;
               setMessage(`테스트케이스 ${job.result?.test_case_count||0}개 · 단계 ${job.result?.step_count||0}개를 새 사양서 초안에 저장했습니다. 원문과 비교해 검토하세요. 실제 수행 결과는 미실행입니다.`);
             }else setMessage(job.error?.message||job.missing_features?.map(f=>f.message).join(' / ')||`생성 상태: ${job.status}`);
             break;
@@ -282,117 +249,22 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
     }catch(e){setMessage(errorMessage(e));}finally{setBusy(false);}
   };
   if(!projectId)return <Button onClick={()=>onNavigateStep('SETUP')}>프로젝트를 선택하세요</Button>;
-  return <div className="w-full min-w-0 max-w-7xl mx-auto space-y-5">
+  return <div className="max-w-7xl mx-auto space-y-5">
     <TestSpecLoadingModal
       isOpen={!!generationJobId}
       progress={generationProgress}
-      statusText={generationProgress ? `소주제 분석 및 테스트케이스 생성 중 (${generationProgress.completed}/${generationProgress.total})` : 'AI 테스트케이스 생성 준비 중...'}
+      statusText={generationProgress ? `향후 개선 계획 분석 및 테스트케이스 생성 중 (${generationProgress.completed}/${generationProgress.total})` : 'AI 테스트케이스 생성 준비 중...'}
       onCancel={cancelGenerationJob}
       cancelling={cancellingGeneration}
     />
     <PageHeader stepTag="04 / TEST SPECIFICATION" title="테스트 사양서" description="시험 절차와 실제 수행을 구분해 편집·저장하고 단계별 Excel을 출력합니다."/>
-    {generationPlan&&<div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4"><div role="dialog" aria-modal="true" aria-label="AI 테스트케이스 생성 확인" className="w-full max-w-lg bg-white p-6 rounded-xl space-y-4 shadow-xl"><h2 className="text-lg font-bold">AI 테스트케이스 생성 확인</h2><p className="text-sm">선택한 검증 실행: {generationPlan.runDate}<br/>코드 스냅샷: {generationPlan.snapshot_id.slice(0,8)}</p><p className="text-sm">검토 확정 요구사항 {generationPlan.requirement_count}개 · 소주제 {generationPlan.subtopic_count}개<br/>서버 모델: {generationPlan.provider} / {generationPlan.model}<br/>최대 모델 호출 {generationPlan.max_model_calls}회 · 호출 비용이 발생할 수 있습니다.</p><p className="text-sm text-slate-600">명세·조건을 모델에 보내 테스트 절차와 예상 결과를 작성합니다. 기존 사양서는 유지하고 새 초안을 저장합니다. 실제 수행 O/X는 생성하지 않습니다.</p>{generationError&&<p role="alert" className="text-sm text-red-700">{generationError} 생성 취소 후 범위를 다시 준비하세요.</p>}<div className="flex gap-2"><Button disabled={busy} onClick={startGeneration}>확인한 범위로 생성 시작</Button><Button autoFocus variant="secondary" disabled={busy} onClick={()=>setGenerationPlan(null)}>생성 취소</Button></div></div></div>}
+    {generationPlan&&<div className="fixed inset-0 z-50 bg-slate-900/40 flex items-center justify-center p-4"><div role="dialog" aria-modal="true" aria-label="AI 테스트케이스 생성 확인" className="w-full max-w-lg bg-white p-6 rounded-xl space-y-4 shadow-xl"><h2 className="text-lg font-bold">AI 테스트케이스 생성 확인</h2><p className="text-sm">선택한 검증 실행: {generationPlan.runDate}<br/>코드 스냅샷: {generationPlan.snapshot_id.slice(0,8)}</p><p className="text-sm">검토 확정 요구사항 {generationPlan.requirement_count}개 · 향후 개선 계획 {generationPlan.subtopic_count}개<br/>서버 모델: {generationPlan.provider} / {generationPlan.model}<br/>최대 모델 호출 {generationPlan.max_model_calls}회 · 호출 비용이 발생할 수 있습니다.</p><p className="text-sm text-slate-600">명세·조건을 모델에 보내 테스트 절차와 예상 결과를 작성합니다. 기존 사양서는 유지하고 새 초안을 저장합니다. 실제 수행 O/X는 생성하지 않습니다.</p>{generationError&&<p role="alert" className="text-sm text-red-700">{generationError} 생성 취소 후 범위를 다시 준비하세요.</p>}<div className="flex gap-2"><Button disabled={busy} onClick={startGeneration}>확인한 범위로 생성 시작</Button><Button autoFocus variant="secondary" disabled={busy} onClick={()=>setGenerationPlan(null)}>생성 취소</Button></div></div></div>}
     {message&&<p role="status" className="bg-blue-50 p-3 rounded text-sm">{message}</p>}
-    {/* 상단 툴바 카드 */}
-    <div className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-2xs space-y-3.5">
-      {/* 1행: 기준 검증 실행 선택 & AI 생성 */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
-        <div className="flex flex-wrap items-center gap-2 min-w-0">
-          <label className="text-xs font-semibold text-slate-700 whitespace-nowrap">
-            새 사양서 생성 기준:
-          </label>
-          <select
-            aria-label="사양서 생성 기준 실행"
-            className="min-w-0 max-w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-800 shadow-2xs font-medium focus:outline-none focus:border-blue-500"
-            value={runId}
-            disabled={editing||adding||busy||!!generationJobId}
-            onChange={e=>{setRunId(e.target.value);setMessage('');}}
-          >
-            {runs.map((r, idx)=>(
-              <option key={r.id} value={r.id}>
-                {formatRunDate(r.created_at)} ({runStatusLabel(r.status)}){idx === 0 ? ' · 최신' : ''}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="primary"
-            size="md"
-            disabled={runs.find(r=>r.id===runId)?.status!=='completed'||busy||editing||adding||!!generationJobId}
-            onClick={generate}
-            className="flex items-center gap-1.5 shadow-2xs font-semibold"
-          >
-            <span>AI 테스트케이스 생성</span>
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="md"
-            disabled={!runId||busy||editing||adding||!!generationJobId}
-            onClick={createSpec}
-            className="shadow-2xs text-xs"
-          >
-            수동 사양서 만들기
-          </Button>
-        </div>
-      </div>
-
-      {/* 2행: 사양서 문서 버전 선택 & 내보내기/편집 */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div className="flex flex-wrap items-center gap-2 min-w-0">
-          <label className="text-xs font-semibold text-slate-700 whitespace-nowrap">
-            저장된 사양서:
-          </label>
-          <select
-            aria-label="테스트 사양서 선택"
-            value={specId}
-            className="min-w-0 max-w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-800 shadow-2xs font-medium focus:outline-none focus:border-blue-500"
-            disabled={editing||adding||busy}
-            onChange={e=>setSpecId(e.target.value)}
-          >
-            {specs.map(s=>(
-              <option key={s.id} value={s.id}>
-                {s.created_at ? `${formatRunDate(s.created_at)} · ` : ''}{s.origin==='generated'?'AI 생성':'수동 작성'} · 개정 {s.revision} · {runStatusLabel(s.status)}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2">
-          <Button
-            variant="secondary"
-            size="md"
-            disabled={!spec||busy||editing||adding}
-            onClick={()=>setAdding(true)}
-            className="flex items-center gap-1.5 shadow-2xs text-xs"
-          >
-            <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-            </svg>
-            <span>시험 수동 추가</span>
-          </Button>
-
-          <Button
-            variant="secondary"
-            size="md"
-            disabled={!spec||busy||editing||adding}
-            onClick={exportExcel}
-            className="flex items-center gap-1.5 shadow-2xs text-xs"
-          >
-            <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-            </svg>
-            <span>Excel 내보내기</span>
-          </Button>
-        </div>
-      </div>
-    </div>
-
-    {spec&&<p className="text-xs text-slate-500">이 사양서의 검증 기준: {runs.find(r=>r.id===spec.verification_run_id)?.created_at ? formatRunDate(runs.find(r=>r.id===spec.verification_run_id)!.created_at) : '연결된 검증 이력 확인 필요'} · 요구사항은 해당 실행에 고정된 개정으로 확인합니다.</p>}
-    {runs.length>0&&runs.find(r=>r.id===runId)?.status!=='completed'&&<p className="text-xs text-amber-700 bg-amber-50 p-2.5 rounded-lg border border-amber-200">AI 생성에는 코드 검증이 완료된 실행이 필요합니다. 수동 사양서는 현재 실행에서도 만들 수 있습니다.</p>}
-    {!runs.length&&<p className="text-xs text-slate-500 bg-slate-50 p-2.5 rounded-lg border border-slate-200">먼저 요구사항을 검토 확정하고 검증을 접수하세요. 모델 미연결 실행에서도 수동 사양서를 작성할 수 있습니다.</p>}
+    <div className="flex flex-wrap gap-2"><select aria-label="사양서 생성 기준 실행" className={inputClass+' max-w-sm'} value={runId} disabled={editing||adding||busy||!!generationJobId} onChange={e=>{setRunId(e.target.value);setMessage('');}}>{runs.map(r=><option key={r.id} value={r.id}>{r.created_at} · {r.status}</option>)}</select><Button disabled={!runId||busy||editing||adding||!!generationJobId} onClick={createSpec}>수동 사양서 만들기</Button><Button variant="secondary" disabled={runs.find(r=>r.id===runId)?.status!=='completed'||busy||editing||adding||!!generationJobId} onClick={generate}>AI 테스트케이스 생성</Button></div>
+    {runs.length>0&&runs.find(r=>r.id===runId)?.status!=='completed'&&<p className="text-sm text-amber-700">AI 생성에는 코드 검증이 완료된 실행이 필요합니다. 수동 사양서는 현재 실행에서도 만들 수 있습니다.</p>}
+    {!runs.length&&<p>먼저 요구사항을 검토 확정하고 검증을 접수하세요. 모델 미연결 실행에서도 수동 사양서를 작성할 수 있습니다.</p>}
+    <div className="flex flex-wrap gap-2"><select aria-label="테스트 사양서 선택" value={specId} className={inputClass+' max-w-sm'} disabled={editing||adding||busy} onChange={e=>setSpecId(e.target.value)}>{specs.map(s=><option key={s.id} value={s.id}>{s.id.slice(0,8)} · 개정 {s.revision} · {s.status}</option>)}</select><Button disabled={!spec||busy||editing||adding} onClick={()=>setAdding(true)}>시험 수동 추가</Button><Button disabled={!spec||busy||editing||adding} onClick={exportExcel}>테스트 Excel 출력</Button></div>
+    {summary&&<p className="text-sm">시나리오 {summary.scenario_summary.total}개 · 단계 {summary.step_summary.total}개 · 통과 {summary.step_summary.passed} / 실패 {summary.step_summary.failed} / 보류 {summary.step_summary.on_hold} / 미실행 {summary.step_summary.not_run}</p>}
     {spec?.origin==='generated'&&spec.generation_status==='completed'&&<p className="text-sm text-amber-800">AI 생성 초안입니다. 예상 결과·입력값·누락 조건을 원문과 비교한 뒤 사용하세요. 코드 예측과 실제 수행 결과는 구분됩니다.</p>}
     {spec?.origin==='generated'&&spec.generation_status==='failed'&&<p className="text-sm text-red-700">이 사양서의 AI 생성은 실패했습니다. 기존 시험 기록은 유지됩니다. 다시 생성하려면 위의 AI 테스트케이스 생성을 선택하세요.</p>}
     {!!(spec?.warnings?.length||spec?.uncovered_conditions?.length)&&<details className="border rounded p-3 text-sm text-amber-800"><summary>생성 경고 {spec?.warnings?.length||0}건 · 미포함 조건 {spec?.uncovered_conditions?.length||0}개</summary>{spec?.warnings?.map((w,i)=><p key={`w-${i}`}>{w.message}</p>)}{spec?.uncovered_conditions?.map((u,i)=><p key={`u-${i}`}>{requirements.find(r=>r.id===u.requirement_id)?.title}: {u.reason}</p>)}</details>}
@@ -404,57 +276,26 @@ export const TestSpecView:React.FC<{onNavigateStep:(step:StepId)=>void;selectedR
       {newSteps.map((s,i)=><fieldset key={i} className="border rounded p-3 space-y-2"><legend>단계 {i+1}</legend>{(['action','expected','input'] as const).map(k=><label key={k} className="block">{k==='action'?'시험 절차':k==='expected'?'기대 결과':'입력값'}<input aria-label={`새 단계 ${i+1} ${k}`} required={k!=='input'} className={inputClass} value={s[k]} onChange={e=>setNewSteps(prev=>prev.map((x,n)=>n===i?{...x,[k]:e.target.value}:x))}/></label>)}</fieldset>)}
       <div className="flex gap-2"><Button type="button" variant="secondary" onClick={()=>setNewSteps(prev=>[...prev,{action:'',expected:'',input:''}])}>시험 단계 추가</Button><Button type="submit" disabled={busy}>시험 추가 저장</Button><Button type="button" variant="secondary" disabled={busy} onClick={resetNewCaseForm}>추가 취소</Button></div>
     </form></Card>}
-    <div className="grid xl:grid-cols-[270px_minmax(0,1fr)] gap-5 items-start">
-      <Card title="시험 목록" description={`${visible.length}개 시험`} className="min-w-0">
-        <label className="block text-xs font-medium text-slate-500 mb-2" htmlFor="test-requirement-filter">연결 요구사항</label>
-        <select id="test-requirement-filter" aria-label="시험 요구사항 필터" className={inputClass} value={filter} disabled={editing||adding||busy} onChange={e=>setFilter(e.target.value)}><option value="">전체 요구사항</option>{requirements.map(r=><option key={r.id} value={r.id}>{r.title}</option>)}</select>
-        <div className="mt-3 space-y-2 max-h-64 xl:max-h-[70vh] overflow-y-auto">
-          {visible.map(c=><button key={c.id} aria-pressed={active?.id===c.id} disabled={busy} className={`w-full text-left border rounded-lg p-3 transition-colors ${active?.id===c.id?'bg-blue-50 border-blue-300':'bg-white border-slate-200 hover:bg-slate-50'}`} onClick={()=>setActiveId(c.id)}>
-            <span className="block text-xs text-slate-500">{c.test_no}</span>
-            <strong className="block mt-1 text-sm font-medium leading-6 text-slate-900 break-words">{c.title}</strong>
-            <span className="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs text-slate-500"><span>{caseTypeLabels[c.type]}</span><span>{c.steps.length}단계</span><span>{statusLabels[(executions[c.id]?.status||'not_run') as keyof typeof statusLabels]}</span></span>
-            {(drafts[c.id]?.procedureChanged||drafts[c.id]?.executionChanged)&&<span className="block mt-2 text-xs text-amber-800">저장하지 않은 변경</span>}
-          </button>)}
-          {!visible.length&&<p className="py-5 text-sm text-slate-500">현재 범위에 시험이 없습니다.</p>}
-        </div>
-      </Card>
-      <Card title="시험 상세" description={active?.test_no} className="min-w-0" extra={active&&!adding?(editing?<div className="flex gap-2"><Button disabled={busy||!changed} onClick={save}>저장</Button><Button variant="secondary" disabled={busy} onClick={()=>{setDrafts({});setEditing(false);setUnsavedChanges(false);void loadSpec().catch(e=>setMessage(errorMessage(e)));}}>취소</Button></div>:<Button aria-label="시험 표 편집" variant="secondary" disabled={busy} onClick={()=>setEditing(true)}>시험 편집</Button>):undefined}>
-        {active?(()=>{
-          const draft=draftFor(active);
-          const steps=editing?draft.steps:active.steps;
-          const conditionCount=new Set(active.requirement_links.flatMap(l=>l.condition_ids.map(id=>`${l.requirement_id}:${l.requirement_revision}:${id}`))).size;
-          return <div className="space-y-6 text-sm leading-7">
-            <header className="space-y-3">
-              <p className="text-xs text-slate-500">{active.origin==='generated'?'AI 생성 초안':'수동 작성'} · {caseTypeLabels[active.type]} · 절차 개정 {active.revision}</p>
-              {editing?<label className="block text-xs font-medium text-slate-600">시험 제목<input aria-label="편집 시험 제목" className={inputClass+' mt-1 font-normal'} value={draft.title} onChange={e=>changeProcedure(active.id,{title:e.target.value})}/></label>:<h2 className="text-lg font-semibold leading-7 text-slate-900 break-words">{active.title}</h2>}
-              <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 flex flex-wrap items-center justify-between gap-3">
-                <div><p className="text-xs font-medium text-slate-500">작성 근거</p><p className="text-sm">요구사항 {active.requirement_links.length}개 · 수락 조건 {conditionCount}개</p><p className="mt-1 text-xs text-slate-500">{active.origin==='generated'?'검토 확정한 명세 원문·수락 조건·검토 메모로 생성했습니다.':'직접 작성한 시험에 연결된 명세입니다.'}</p></div>
-                <Button variant="secondary" onClick={()=>setEvidenceSelection({title:'이 시험의 요구사항 근거',links:active.requirement_links})}>요구사항·원문 보기</Button>
-              </div>
-            </header>
-            <section><h3 className="text-xs font-semibold text-slate-500 mb-2">사전 조건</h3>{editing?<textarea aria-label="편집 사전 조건" className={inputClass} rows={3} value={draft.preconditions} onChange={e=>changeProcedure(active.id,{preconditions:e.target.value})}/>:<p className="whitespace-pre-wrap select-text">{active.preconditions||'별도 사전 조건이 없습니다.'}</p>}</section>
-            <details className="rounded-lg border border-slate-200 px-4 py-3"><summary className="cursor-pointer font-medium text-slate-700">코드 기반 예측 · {draft.procedureChanged?'수정 후 재검토 필요':predictionLabels[active.prediction?.status||'unknown']||'확인 필요'}</summary><p className="mt-2 text-slate-600 select-text">{draft.procedureChanged?'절차를 변경하면 기존 코드 예측을 그대로 적용할 수 없습니다.':active.prediction?.reason||'코드 예측이 없습니다.'}</p><p className="mt-2 text-xs text-slate-500">기대 결과는 명세 기준이며, 코드 예측은 검증 결과를 참고한 값입니다. 실제 수행 결과와 구분됩니다.</p></details>
-            {!!(active.assumptions?.length||active.warnings?.length)&&<details className="rounded-lg border border-amber-200 px-4 py-3"><summary className="cursor-pointer text-amber-900 font-medium">검토할 가정·주의사항 {(active.assumptions?.length||0)+(active.warnings?.length||0)}건</summary><div className="mt-3 space-y-3 text-slate-600 select-text">{active.assumptions?.map((text,i)=><div key={`a-${i}`}><p className="text-xs font-medium text-amber-800">AI가 둔 가정 · 명세와 대조 필요</p><p className="mt-1 whitespace-pre-wrap">{text}</p></div>)}{active.warnings?.map((w,i)=><p key={`w-${i}`} className="border-t border-slate-100 pt-3 whitespace-pre-wrap">{w.message}</p>)}</div></details>}
-            {draft.procedureChanged&&<p className="text-amber-800 text-sm">절차를 변경했습니다. 이전 수행 결과를 새 절차에 적용하지 않습니다.</p>}
-            <section className="space-y-4"><h3 className="text-sm font-semibold text-slate-900">테스트 단계 <span className="font-normal text-slate-500">{steps.length}개</span></h3>
-              {steps.map((step,i)=>{
-                const result=editing?draft.results.find(r=>r.step_key===step.step_key):executions[active.id]?.step_results.find(r=>r.step_key===step.step_key);
-                const count=step.requirement_links.reduce((n,r)=>n+r.condition_ids.length,0);
-                return <section key={step.step_key} aria-label={`단계 ${i+1}`} className="border border-slate-200 rounded-lg overflow-hidden">
-                  <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 px-4 py-3 border-b border-slate-200"><h4 className="font-semibold">단계 {i+1}</h4><button type="button" className="text-xs font-medium text-blue-600 underline underline-offset-2" onClick={()=>setEvidenceSelection({title:`단계 ${i+1}의 요구사항 근거`,links:step.requirement_links})}>이 단계의 근거 · 조건 {count}개</button></div>
-                  <div className="p-4 space-y-5">
-                    <div className="grid md:grid-cols-2 gap-4">{(['action','expected'] as const).map(k=><div key={k} className={k==='expected'?'rounded-lg bg-slate-50 p-3':'py-3'}><label className="block text-xs font-semibold text-slate-500 mb-2" htmlFor={`test-${active.id}-${step.step_key}-${k}`}>{k==='action'?'시험 절차':'기대 결과 · 명세 기준'}</label>{editing?<textarea id={`test-${active.id}-${step.step_key}-${k}`} aria-label={`단계 ${i+1} ${k}`} rows={4} className={inputClass+' leading-7'} value={step[k]} onChange={e=>changeProcedure(active.id,{steps:draft.steps.map((s,n)=>n===i?{...s,[k]:e.target.value}:s)})}/>:<p className="whitespace-pre-wrap select-text [overflow-wrap:anywhere]">{step[k]}</p>}</div>)}</div>
-                    <dl className="grid sm:grid-cols-2 gap-x-5 gap-y-3 text-sm"><div><dt className="text-xs font-medium text-slate-500 mb-1">입력값</dt><dd>{editing?<input aria-label={`단계 ${i+1} 입력값`} className={inputClass} value={step.test_data.input} onChange={e=>changeProcedure(active.id,{steps:draft.steps.map((s,n)=>n===i?{...s,test_data:{...s.test_data,input:e.target.value}}:s)})}/>:<p className="whitespace-pre-wrap select-text">{step.test_data.input||'별도 입력 없음'}</p>}</dd></div><div><dt className="text-xs font-medium text-slate-500 mb-1">시험 계정·역할</dt><dd className="whitespace-pre-wrap select-text">{step.test_data.account||'지정되지 않음'}</dd></div>{step.test_data.notes&&<div className="sm:col-span-2"><dt className="text-xs font-medium text-slate-500 mb-1">시험 비고</dt><dd className="whitespace-pre-wrap select-text">{step.test_data.notes}</dd></div>}</dl>
-                    <section className="border-t border-slate-200 pt-4"><h5 className="text-xs font-semibold text-slate-500 mb-3">실제 수행 기록</h5>{editing?<div className="grid md:grid-cols-2 gap-3"><label className="text-xs text-slate-600">수행 상태<select aria-label={`단계 ${i+1} 수행 상태`} className={inputClass+' mt-1'} value={result?.status||'not_run'} onChange={e=>changeResult(active.id,step.step_key,'status',e.target.value)}>{Object.entries(statusLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><label className="text-xs text-slate-600">실제 결과<input aria-label={`단계 ${i+1} 실제 결과`} className={inputClass+' mt-1'} value={result?.actual||''} onChange={e=>changeResult(active.id,step.step_key,'actual',e.target.value)}/></label><label className="md:col-span-2 text-xs text-slate-600">수행 메모·보류 사유<input aria-label={`단계 ${i+1} 수행 메모`} className={inputClass+' mt-1'} value={result?.notes||''} onChange={e=>changeResult(active.id,step.step_key,'notes',e.target.value)}/></label></div>:<div><p className="font-medium text-slate-700">{statusLabels[result?.status||'not_run']}</p>{result?.actual&&<p className="mt-1 whitespace-pre-wrap select-text">{result.actual}</p>}{result?.notes&&<p className="mt-1 text-slate-600 whitespace-pre-wrap select-text">{result.notes}</p>}{(!result||result.status==='not_run')&&<p className="mt-1 text-xs text-slate-500">아직 수행 결과를 기록하지 않았습니다.</p>}</div>}</section>
-                  </div>
-                </section>;
-              })}
-            </section>
-            {editing&&<Button variant="secondary" disabled={draft.steps.length>=100} onClick={()=>changeProcedure(active.id,{steps:[...draft.steps,{...structuredClone(draft.steps[0]),step_key:crypto.randomUUID(),order:draft.steps.length+1,action:'',expected:''}]})}>단계 추가</Button>}
-          </div>;
-        })():<p className="py-8 text-center text-sm text-slate-500">목록에서 시험을 선택하거나 새 사양서를 만들어 주세요.</p>}
+    <div className="grid lg:grid-cols-[260px_1fr] gap-5">
+      <Card title="시험 목록"><select aria-label="시험 요구사항 필터" className={inputClass} value={filter} disabled={editing} onChange={e=>setFilter(e.target.value)}><option value="">전체 요구사항</option>{requirements.map(r=><option key={r.id} value={r.id}>{r.title}</option>)}</select><div className="mt-3 space-y-2">{visible.map(c=><button key={c.id} disabled={busy} className={`w-full text-left border rounded p-3 text-sm ${active?.id===c.id?'bg-blue-50 border-blue-400':''}`} onClick={()=>setActiveId(c.id)}>{c.test_no}<strong className="block">{c.title}</strong><small>{statusLabels[(executions[c.id]?.status||'not_run') as keyof typeof statusLabels]} · 개정 {c.revision}{drafts[c.id]?.procedureChanged||drafts[c.id]?.executionChanged?' · 미저장':''}</small></button>)}</div></Card>
+      <Card title={active?.title||'등록된 시험이 없습니다'} extra={active&&!adding?(editing?<div className="flex gap-2"><Button disabled={busy||!changed} onClick={save}>저장</Button><Button variant="secondary" disabled={busy} onClick={()=>{setDrafts({});setEditing(false);setUnsavedChanges(false);void loadSpec().catch(e=>setMessage(errorMessage(e)));}}>취소</Button></div>:<Button aria-label="시험 표 편집" disabled={busy} onClick={()=>setEditing(true)}>시험 편집</Button>):undefined}>
+        {active&&(()=>{const draft=draftFor(active);const steps=editing?draft.steps:active.steps;return <div className="space-y-4">
+          <p className="text-sm">코드 예측: {predictionLabels[active.prediction?.status||'unknown']||'확인 필요'} · {active.prediction?.reason||'없음'}</p>
+          <p className="text-sm whitespace-pre-wrap">사전 조건: {active.preconditions||'없음'}</p>
+          {active.assumptions?.map((text,i)=><p className="text-sm text-amber-700" key={`a-${i}`}>확인할 가정: {text}</p>)}
+          {active.warnings?.map((w,i)=><p className="text-sm text-amber-700" key={`w-${i}`}>{w.message}</p>)}
+          {draft.procedureChanged&&<p className="text-amber-700 text-sm">절차를 변경했습니다. 이전 수행 결과를 새 절차에 적용하지 않습니다.</p>}
+          {editing&&<label>시험 제목<input aria-label="편집 시험 제목" className={inputClass} value={draft.title} onChange={e=>changeProcedure(active.id,{title:e.target.value})}/></label>}
+          {steps.map((step,i)=>{const result=editing?draft.results.find(r=>r.step_key===step.step_key):executions[active.id]?.step_results.find(r=>r.step_key===step.step_key);return <fieldset key={step.step_key} className="border rounded p-4 space-y-3"><legend>단계 {i+1}</legend>
+            <div className="grid md:grid-cols-2 gap-3">{(['action','expected'] as const).map(k=><label key={k}>{k==='action'?'시험 절차':'기대 결과'}{editing?<textarea aria-label={`단계 ${i+1} ${k}`} className={inputClass} value={step[k]} onChange={e=>changeProcedure(active.id,{steps:draft.steps.map((s,n)=>n===i?{...s,[k]:e.target.value}:s)})}/>:<p className="text-sm whitespace-pre-wrap select-text">{step[k]}</p>}</label>)}</div>
+            <label className="block">입력값{editing?<input aria-label={`단계 ${i+1} 입력값`} className={inputClass} value={step.test_data.input} onChange={e=>changeProcedure(active.id,{steps:draft.steps.map((s,n)=>n===i?{...s,test_data:{...s.test_data,input:e.target.value}}:s)})}/>:<p className="text-sm">{step.test_data.input||'미지정'}</p>}</label>
+            <p className="text-xs text-slate-600">시험 계정/역할: {step.test_data.account||'미지정'} · 비고: {step.test_data.notes||'없음'}</p>
+            {editing?<div className="grid md:grid-cols-3 gap-3"><label>수행 상태<select aria-label={`단계 ${i+1} 수행 상태`} className={inputClass} value={result?.status||'not_run'} onChange={e=>changeResult(active.id,step.step_key,'status',e.target.value)}>{Object.entries(statusLabels).map(([k,v])=><option key={k} value={k}>{v}</option>)}</select></label><label>실제 결과<input aria-label={`단계 ${i+1} 실제 결과`} className={inputClass} value={result?.actual||''} onChange={e=>changeResult(active.id,step.step_key,'actual',e.target.value)}/></label><label>수행 메모 / 보류 사유<input aria-label={`단계 ${i+1} 수행 메모`} className={inputClass} value={result?.notes||''} onChange={e=>changeResult(active.id,step.step_key,'notes',e.target.value)}/></label></div>:<p className="text-sm">실제 수행: {statusLabels[result?.status||'not_run']} · {result?.actual} {result?.notes}</p>}
+            <p className="text-xs text-slate-400">연결 조건 {step.requirement_links.reduce((n,r)=>n+r.condition_ids.length,0)}개 · 단계 키 {step.step_key}</p>
+          </fieldset>;})}
+          {editing&&<Button variant="secondary" onClick={()=>changeProcedure(active.id,{steps:[...draft.steps,{...structuredClone(draft.steps[0]),step_key:crypto.randomUUID(),order:draft.steps.length+1,action:'',expected:''}]})}>단계 추가</Button>}
+        </div>;})()}
       </Card>
     </div>
-    {evidenceSelection&&<TestEvidenceDialog projectId={projectId} title={evidenceSelection.title} links={evidenceSelection.links} requirements={requirements} onClose={()=>setEvidenceSelection(null)}/>}
   </div>;
 };

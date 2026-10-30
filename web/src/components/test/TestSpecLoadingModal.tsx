@@ -111,7 +111,7 @@ export const TestSpecLoadingModal: React.FC<TestSpecLoadingModalProps> = ({
             </span>
             {hasProgress ? (
               <span className="font-bold text-emerald-600">
-                {progress.completed} / {progress.total} 소주제 ({percent}%)
+                {progress.completed} / {progress.total} 향후 개선 계획 ({percent}%)
               </span>
             ) : (
               <span className="text-slate-400">대기 중...</span>

@@ -17,6 +17,55 @@ export interface TestStep {
   expected: string;
   test_data: TestData;
   requirement_links: RequirementLink[];
+  design?: StepDesign | null;
+}
+
+export interface StepDesign {
+  intent_ids: string[];
+  rationale: string;
+  input_rationale: string;
+  basis: 'specification' | 'review_needed';
+}
+
+export interface DesignIntent {
+  id: string;
+  requirement_id: string;
+  requirement_revision: number;
+  requirement_title: string;
+  condition_id: string;
+  condition_key: string;
+  condition_text: string;
+  perspective: string;
+  label: string;
+  reason: string;
+}
+
+export interface DesignPlan {
+  version: string;
+  origin: 'rule_suggestion';
+  items: DesignIntent[];
+  summary: { condition_count: number; intent_count: number; perspectives: Record<string, number> };
+  limitations: string[];
+}
+
+export interface DesignTestReference {
+  case_id: string;
+  test_no: string;
+  step_key: string;
+  step_order: number;
+  basis: string;
+  stale: boolean;
+}
+
+export interface DesignReview {
+  test_specification_id: string;
+  specification_revision: number;
+  plan_available: boolean;
+  plan_version: string | null;
+  items: (DesignIntent & { status: 'written' | 'review_needed' | 'missing'; gap_reason: string; test_refs: DesignTestReference[] })[];
+  conditions: {requirement_id: string; requirement_revision: number; requirement_title: string; condition_id: string; condition_text: string; test_refs: DesignTestReference[]}[];
+  summary: {conditions_total: number; conditions_linked: number; intents_total: number; intents_written: number; intents_review_needed: number; intents_missing: number};
+  limitations: string[];
 }
 
 export interface TestCase {
@@ -33,6 +82,7 @@ export interface TestCase {
   origin: string;
   assumptions?: string[];
   warnings?: {code: string; message: string}[];
+  design?: {rationale: string; generated_revision: number; origin: 'model'};
   prediction?: {
     status: string;
     reason: string;
@@ -70,6 +120,7 @@ export interface TestSpecification {
   test_case_ids: string[];
   origin?: string;
   generation_status?: string;
+  design_plan_version?: string | null;
   warnings?: {code: string; message: string}[];
   uncovered_conditions?: {requirement_id: string; condition_id: string; reason: string}[];
 }

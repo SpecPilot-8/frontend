@@ -9,6 +9,7 @@ import {
   TestSpecView,
 } from './views';
 import { ProjectProvider, useProject } from './contexts/ProjectContext';
+import { projectStackLabel } from './projectStacks';
 
 const Workspace: React.FC = () => {
   const {unsavedChanges,setUnsavedChanges,navigationLocked,saveBeforeLeaveRef}=useProject();
@@ -32,8 +33,9 @@ const Workspace: React.FC = () => {
     navigate('SETUP');
   };
 
-  const handleProjectUpdated = useCallback((newProjectName: string) => {
+  const handleProjectUpdated = useCallback((newProjectName: string, stack: string) => {
     setProjectName(newProjectName);
+    setTechStack(projectStackLabel(stack));
   }, []);
 
   const handleSelectRequirementForTest = (reqId: string) => {
@@ -53,7 +55,7 @@ const Workspace: React.FC = () => {
         <Header
           currentStep={currentStep}
           onStepChange={navigate}
-          projectName={projectName}
+          projectName={currentStep === 'HOME' ? '프로젝트 선택' : projectName}
           subtitle="요구사항과 코드의 연결을 확인하는 워크스페이스"
         />
 
@@ -67,6 +69,7 @@ const Workspace: React.FC = () => {
               onSwitchProject={handleSwitchProject}
               projectName={projectName}
               techStack={techStack}
+              disabled={navigationLocked}
             />
           )}
 

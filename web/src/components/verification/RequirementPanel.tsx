@@ -108,6 +108,7 @@ export const RequirementPanel: React.FC<RequirementPanelProps> = ({
           )}
         </div>
 
+
         {primaryRef && (<div className="border-t border-slate-100 pt-6">
             <h4 className="text-sm font-bold text-slate-900 mb-3">
               명세 분석 추출 요구사항 (문서 {pageIndex}페이지)
@@ -154,7 +155,10 @@ export const RequirementPanel: React.FC<RequirementPanelProps> = ({
                 <SpecPageViewer
                   fileUrl={`${BASE_URL}/projects/${projectId}/documents/${requirement.document_id}/file`}
                   page={pageIndex}
-                  bbox={bbox}
+                  highlights={(requirement.source_refs || []).flatMap((r, i) =>
+                    r.location?.index === pageIndex && r.location.bbox
+                      ? [{ bbox: r.location.bbox, active: i === 0 }] : [])}
+                  searchText={primaryRef?.quote}
                 />
               </div>
             )}

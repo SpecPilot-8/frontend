@@ -27,6 +27,25 @@ export interface StepDesign {
   basis: 'specification' | 'review_needed';
 }
 
+export type DesignDecision = 'adequate' | 'needs_changes' | 'uncertain';
+export interface ConditionDesignReview {
+  requirement_id: string;
+  requirement_revision: number;
+  condition_id: string;
+  decision: DesignDecision;
+  reason: string;
+}
+export interface HumanDesignReview {
+  test_case_id: string;
+  test_case_revision: number;
+  version: number;
+  origin: 'manual';
+  status: DesignDecision | 'pending';
+  items: ConditionDesignReview[];
+  updated_at: string | null;
+  summary: {linked_conditions: number; reviewed_conditions: number; adequate: number; needs_changes: number; uncertain: number};
+}
+
 export interface DesignIntent {
   id: string;
   requirement_id: string;
@@ -114,6 +133,7 @@ export interface TestExecution {
 export interface TestSpecification {
   id: string;
   created_at?: string;
+  model_config_snapshot?: {provider?: string; model?: string; config_version?: number};
   verification_run_id: string;
   revision: number;
   status: string;

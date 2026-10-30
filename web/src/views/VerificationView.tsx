@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import type { StepId, RequirementItem } from '../types';
+import { formatRequirementTitle } from '../types/verification';
 import { useProject } from '../contexts/ProjectContext';
 import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } from '../services/api';
 import { Button, Card, PageHeader } from '../components/common';
@@ -13,6 +14,15 @@ interface Row { requirement_id: string; requirement_revision: number; stable_key
 interface RunInput { snapshot_id: string; requirement_versions: { requirement_id: string; revision: number }[]; model_config_version: number }
 interface Job { id: string; operation: string; status: string; result_ref?: { id: string }; error?: { message: string }; missing_features: { message: string }[] }
 const labels: Record<string, string> = { implemented: '구현됨', partial: '부분 구현', mismatch: '불일치', not_found: '미구현 후보', needs_review: '확인 필요', not_statically_verifiable: '정적 검증 불가', not_run: '미분석' };
+const statusBadgeStyles: Record<string, string> = {
+  implemented: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  partial: 'bg-amber-50 text-amber-700 border-amber-200',
+  mismatch: 'bg-rose-50 text-rose-700 border-rose-200',
+  not_found: 'bg-blue-50 text-blue-700 border-blue-200',
+  needs_review: 'bg-purple-50 text-purple-700 border-purple-200',
+  not_statically_verifiable: 'bg-slate-100 text-slate-600 border-slate-200',
+  not_run: 'bg-slate-50 text-slate-500 border-slate-200',
+};
 const stages: Record<string, string> = { queued: '대기', scope_analysis: '화면 도달 범위 분석', matching: '코드 근거 매칭', condition_judgment: '조건별 판정' };
 
 export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void; onSelectRequirementForTest?: (id: string) => void }> = ({ onNavigateStep, onSelectRequirementForTest }) => {
@@ -20,6 +30,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   const [runs, setRuns] = useState<Run[]>([]);
   const [runId, setRunId] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
+  const [reqMap, setReqMap] = useState<Record<string, RequirementItem>>({});
   const [summary, setSummary] = useState<Record<string, number>>({});
   const [selected, setSelected] = useState<Row | null>(null);
   const [search, setSearch] = useState('');
@@ -36,8 +47,13 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
 
   const load = useCallback(async () => {
     if (!projectId) return;
-    const [items, jobs] = await Promise.all([fetchAll<Run>(`/projects/${projectId}/verification-runs`), fetchAll<Job>(`/projects/${projectId}/jobs`)]);
+    const [items, jobs, reqs] = await Promise.all([
+      fetchAll<Run>(`/projects/${projectId}/verification-runs`),
+      fetchAll<Job>(`/projects/${projectId}/jobs`),
+      fetchAll<RequirementItem>(`/projects/${projectId}/requirements`).catch(() => [] as RequirementItem[]),
+    ]);
     items.reverse(); setRuns(items); setRunId(prev => items.some(r => r.id === prev) ? prev : items[0]?.id || '');
+    setReqMap(Object.fromEntries(reqs.map(r => [r.id, r])));
     const pending = jobs.find(j => j.operation === 'verify' && ['queued', 'running'].includes(j.status));
     if (pending) { setActiveJob(pending.id); if (pending.result_ref) setRunId(pending.result_ref.id); }
   }, [projectId]);
@@ -218,10 +234,69 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       <Button variant="secondary" onClick={() => onNavigateStep('TEST_SPEC')}>테스트 사양서로 이동</Button>
     </div>
     <Card title="요구사항 추적표" description={run ? `실행 상태: ${run.status} · 스냅샷 ${run.snapshot_id}` : '아직 검증 실행이 없습니다'}>
-      <div className="flex flex-wrap gap-3 mb-4"><select aria-label="검증 실행 선택" value={runId} disabled={busy} onChange={e => { setRunId(e.target.value); setMessage(''); }} className="border rounded p-2 max-w-sm">{runs.map(r => <option key={r.id} value={r.id}>{r.created_at} · {r.status}</option>)}</select><input aria-label="추적표 검색" placeholder="기능·주제 검색" value={search} onChange={e => setSearch(e.target.value)} className="border rounded p-2" /><select aria-label="판정 필터" value={filter} onChange={e => setFilter(e.target.value)} className="border rounded p-2"><option value="">전체</option>{Object.entries(labels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select><Button disabled={!runId || busy} onClick={exportTrace}>실행 전체 Excel 출력</Button></div>
-      <p className="text-xs text-slate-500 mb-3">Excel은 현재 검색·필터와 관계없이 선택한 검증 실행 전체를 출력합니다.</p>
-      <p className="text-sm mb-4">선택 범위 {summary.total || 0}건 · 구현됨 {summary.implemented || 0}건 · 구현율 {(summary.implementation_rate || 0).toFixed(1)}% · 미분석 {summary.not_run || 0}건</p>
-      <div className="overflow-auto"><table className="w-full text-sm text-left"><thead><tr>{['주제 / 소주제', '기능명', '판정', '근거', '사유', '상세'].map(v => <th className="p-3 border-b" key={v}>{v}</th>)}</tr></thead><tbody>{rows.map(r => <tr key={r.requirement_id}><td className="p-3 border-b">{r.topic_title} / {r.subtopic_title}</td><td className="p-3 border-b">{r.title}<small className="block">개정 {r.requirement_revision}</small></td><td className="p-3 border-b">{labels[r.status || 'not_run']}<small className="block">{r.analysis_state}</small></td><td className="p-3 border-b">{r.evidence_count}곳</td><td className="p-3 border-b">{r.reason}</td><td className="p-3 border-b"><Button onClick={() => setSelected(r)}>상세 보기</Button></td></tr>)}</tbody></table>{!rows.length && <p className="p-4 text-sm text-slate-500">현재 선택 범위의 요구사항이 없습니다.</p>}</div>
+      <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-slate-50/80 border border-slate-200/80 rounded-xl mb-3">
+        <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0">
+          <select aria-label="검증 실행 선택" value={runId} disabled={busy} onChange={e => { setRunId(e.target.value); setMessage(''); }} className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-white shadow-2xs focus:outline-none focus:border-blue-500 max-w-xs truncate">{runs.map(r => <option key={r.id} value={r.id}>{r.created_at} · {r.status}</option>)}</select>
+          <input aria-label="추적표 검색" placeholder="기능·주제 검색" value={search} onChange={e => setSearch(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-white shadow-2xs focus:outline-none focus:border-blue-500 w-52" />
+          <select aria-label="판정 필터" value={filter} onChange={e => setFilter(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-white shadow-2xs focus:outline-none focus:border-blue-500"><option value="">전체</option>{Object.entries(labels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
+        </div>
+        <Button disabled={!runId || busy} onClick={exportTrace} className="whitespace-nowrap shadow-2xs">실행 전체 Excel 출력</Button>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-1">
+        <p className="text-xs font-medium text-slate-700 bg-slate-100/80 border border-slate-200/70 px-3 py-1.5 rounded-lg">
+          선택 범위 <strong className="text-slate-900">{summary.total || 0}건</strong> · 구현됨 <strong className="text-emerald-600">{summary.implemented || 0}건</strong> · 구현율 <strong className="text-blue-600">{(summary.implementation_rate || 0).toFixed(1)}%</strong> · 미분석 <strong className="text-slate-500">{summary.not_run || 0}건</strong>
+        </p>
+        <p className="text-xs text-slate-400">Excel은 현재 검색·필터와 관계없이 선택한 검증 실행 전체를 출력합니다.</p>
+      </div>
+      <div className={`rounded-xl border border-slate-200 overflow-auto ${rows.length > 10 ? 'max-h-160' : ''}`}>
+        <table className="w-full min-w-230 text-sm text-left border-collapse">
+          <thead className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600 sticky top-0 z-10">
+            <tr>
+              <th className="w-44 min-w-40 px-4 py-3 whitespace-nowrap">주제 / 소주제</th>
+              <th className="w-52 min-w-45 px-4 py-3 whitespace-nowrap">기능명</th>
+              <th className="w-28 min-w-27.5 px-4 py-3 text-center whitespace-nowrap">판정</th>
+              <th className="w-20 min-w-19 px-3 py-3 text-center whitespace-nowrap">근거</th>
+              <th className="px-4 py-3 whitespace-nowrap">사유</th>
+              <th className="w-24 min-w-24 px-4 py-3 text-center whitespace-nowrap">상세</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {rows.map(r => {
+              const statusKey = r.status || 'not_run';
+              return (
+                <tr key={r.requirement_id} className="hover:bg-slate-50/80 transition-colors">
+                  <td className="px-4 py-3.5 align-middle text-xs font-medium text-slate-700 break-keep leading-snug">
+                    {r.topic_title} / {r.subtopic_title}
+                  </td>
+                  <td className="px-4 py-3.5 align-middle break-keep">
+                    <div className="font-semibold text-slate-900 leading-snug">
+                      {formatRequirementTitle(r.title, reqMap[r.requirement_id]?.original_text, reqMap[r.requirement_id]?.conditions)}
+                    </div>
+                  </td>
+                  <td className="px-4 py-3.5 align-middle text-center whitespace-nowrap">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${statusBadgeStyles[statusKey] || statusBadgeStyles.not_run}`}>
+                      {labels[statusKey]}
+                    </span>
+                    <small className="block mt-1 text-[11px] text-slate-400">{r.analysis_state}</small>
+                  </td>
+                  <td className="px-3 py-3.5 align-middle text-center whitespace-nowrap">
+                    <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-md text-xs font-semibold ${r.evidence_count > 0 ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-slate-100 text-slate-500'}`}>
+                      {r.evidence_count}곳
+                    </span>
+                  </td>
+                  <td className="px-4 py-3.5 align-middle text-[13px] text-slate-600 leading-relaxed break-keep">
+                    {r.reason}
+                  </td>
+                  <td className="px-4 py-3.5 align-middle text-center whitespace-nowrap">
+                    <Button size="sm" className="whitespace-nowrap" onClick={() => setSelected(r)}>상세 보기</Button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!rows.length && <p className="p-6 text-center text-sm text-slate-500 bg-white">현재 선택 범위의 요구사항이 없습니다.</p>}
+      </div>
     </Card>
   </div>;
 };

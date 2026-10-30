@@ -1,8 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
-import * as pdfjs from "pdfjs-dist";
-import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
-
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
+import type * as pdfjs from "pdfjs-dist";
+import { loadDocument } from "../common/pdf";
 
 export interface PageHighlight {
   // [x, y, w, h], PDF 좌표(pt, 왼쪽 위 기준)
@@ -28,17 +26,6 @@ type LocateStatus = "bbox" | "text" | "none";
 
 // 화면설계서 한 페이지를 패널 폭에 다 맞추면 글자를 읽을 수 없어서 기본은 확대해서 요구사항 위치로 스크롤한다
 const ZOOM = 3;
-
-// 같은 문서를 요구사항마다 다시 받지 않는다
-const documents = new Map<string, Promise<pdfjs.PDFDocumentProxy>>();
-const loadDocument = (url: string) => {
-  if (!documents.has(url)) {
-    const task = pdfjs.getDocument(url).promise;
-    task.catch(() => documents.delete(url));
-    documents.set(url, task);
-  }
-  return documents.get(url)!;
-};
 
 const normalize = (s: string) => s.replace(/\s+/g, "");
 

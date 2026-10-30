@@ -1,5 +1,5 @@
 import type { RequirementItem, SourceReference } from '../types/analysis';
-import type { RequirementLink } from '../types/test';
+import type { RequirementLink, TestCase } from '../types/test';
 
 export type TestRequirement = RequirementItem & {
   revision: number;
@@ -31,4 +31,8 @@ export function evidenceSources(condition: { source_refs?: SourceReference[] }, 
   return condition.source_refs?.length
     ? { refs: condition.source_refs, kind: 'condition' as const }
     : { refs: requirement.source_refs || [], kind: 'requirement' as const };
+}
+
+export function currentDesign(test: Pick<TestCase, 'revision' | 'design'>) {
+  return !!test.design && test.design.generated_revision === test.revision;
 }

@@ -47,6 +47,8 @@ function getLanguageFromFilePath(filePath?: string): string {
   }
 }
 
+export type CodeLineHighlight = 'match' | 'mismatch' | 'review';
+
 export interface CodeBlockProps {
   code: string;
   filePath?: string;
@@ -60,7 +62,20 @@ export interface CodeBlockProps {
     text: string;
     variant: 'danger' | 'info' | 'neutral';
   };
+  lineHighlights?: Record<number, CodeLineHighlight>;
 }
+
+const LINE_HIGHLIGHT_ROW_CLASSES: Record<CodeLineHighlight, string> = {
+  match: 'bg-emerald-500/15 hover:bg-emerald-500/25',
+  mismatch: 'bg-rose-500/20 hover:bg-rose-500/30',
+  review: 'bg-amber-500/15 hover:bg-amber-500/25',
+};
+
+const LINE_HIGHLIGHT_NUM_CLASSES: Record<CodeLineHighlight, string> = {
+  match: 'border-l-2 border-l-emerald-400 text-emerald-300 font-semibold',
+  mismatch: 'border-l-2 border-l-rose-400 text-rose-300 font-semibold',
+  review: 'border-l-2 border-l-amber-400 text-amber-300 font-semibold',
+};
 
 export const CodeBlock: React.FC<CodeBlockProps> = ({
   code,
@@ -72,6 +87,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
   className = '',
   headerTitle,
   badge,
+  lineHighlights,
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -160,18 +176,28 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
       <div className="overflow-x-auto p-3.5 leading-relaxed selection:bg-blue-500/30 selection:text-white">
         <table className="w-full border-collapse">
           <tbody>
-            {lines.map((line) => (
-              <tr key={line.lineNumber} className="hover:bg-slate-800/40 transition-colors">
-                {showLineNumbers && (
-                  <td className="w-10 pr-4 text-right select-none text-slate-400 text-xs font-mono align-top border-r border-slate-700/50">
-                    {line.lineNumber}
+            {lines.map((line) => {
+              const hl = lineHighlights?.[line.lineNumber];
+              return (
+                <tr
+                  key={line.lineNumber}
+                  className={`transition-colors ${hl ? LINE_HIGHLIGHT_ROW_CLASSES[hl] : 'hover:bg-slate-800/40'}`}
+                >
+                  {showLineNumbers && (
+                    <td
+                      className={`w-10 pr-4 pl-2 text-right select-none text-xs font-mono align-top border-r border-slate-700/50 ${
+                        hl ? LINE_HIGHLIGHT_NUM_CLASSES[hl] : 'text-slate-400'
+                      }`}
+                    >
+                      {line.lineNumber}
+                    </td>
+                  )}
+                  <td className="pl-4 font-mono text-[13px] whitespace-pre align-top">
+                    <span dangerouslySetInnerHTML={{ __html: line.html }} />
                   </td>
-                )}
-                <td className="pl-4 font-mono text-[13px] whitespace-pre align-top">
-                  <span dangerouslySetInnerHTML={{ __html: line.html }} />
-                </td>
-              </tr>
-            ))}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
 

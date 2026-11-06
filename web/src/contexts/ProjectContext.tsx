@@ -3,8 +3,8 @@ import { createContext, useContext, useState, useRef } from "react";
 import type { ReactNode, MutableRefObject } from "react";
 
 interface ProjectContextType {
-  analysisTarget: { requirementId: string; documentId: string; revision: number } | null;
-  setAnalysisTarget: (value: { requirementId: string; documentId: string; revision: number } | null) => void;
+  analysisTarget: { requirementId: string; documentId: string } | null;
+  setAnalysisTarget: (value: { requirementId: string; documentId: string } | null) => void;
   saveBeforeLeaveRef: MutableRefObject<(() => Promise<boolean>) | null>;
   projectId: string | null;
   unsavedChanges: boolean;

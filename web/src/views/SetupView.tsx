@@ -50,7 +50,8 @@ export const SetupView: React.FC<SetupViewProps> = ({
   });
 
   const [modelProfiles, setModelProfiles] = useState<AIModelProfile[]>([]);
-  const [codeSourceTab, setCodeSourceTab] = useState<"ZIP" | "GIT">("ZIP");
+  // Git 저장소 가져오기는 아직 지원하지 않아 ZIP 업로드만 사용한다
+  const [codeSourceTab] = useState<"ZIP" | "GIT">("ZIP");
 
   const [connectionStatus, setConnectionStatus] = useState<
     "IDLE" | "CHECKING" | "SUCCESS" | "FAILED"
@@ -497,26 +498,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
                 <label className={VIEW_HEADER.fieldLabel}>
                   검증 대상 소스코드
                 </label>
-                <div className="flex items-center space-x-1.5">
-                  <Button
-                    type="button"
-                    variant={codeSourceTab === "ZIP" ? "primary" : "secondary"}
-                    size="sm"
-                    onClick={() => setCodeSourceTab("ZIP")}
-                  >
-                    ZIP 업로드
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={codeSourceTab === "GIT" ? "primary" : "secondary"}
-                    size="sm"
-                    disabled
-                    title="원격 Git 가져오기는 후속 지원 예정입니다"
-                    onClick={() => setCodeSourceTab("GIT")}
-                  >
-                    Git 저장소
-                  </Button>
-                </div>
 
                 {codeSourceTab === "ZIP" ? (
                   isSourceUploaded ? (

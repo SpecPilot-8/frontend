@@ -4,6 +4,7 @@ import { Button, CodeBlock, type CodeLineHighlight } from "../common";
 import { CodeViewerModal, type CodeEvidence } from "./CodeViewerModal";
 import { useProject } from "../../contexts/ProjectContext";
 import { api, errorMessage } from "../../services/api";
+import { isVsCodeEnvironment, requestJumpToLine } from "../../services/vscodeHost";
 import { formatRequirementTitle, type Requirement } from "../../types/verification";
 import type { StepId, Condition } from "../../types";
 
@@ -160,6 +161,8 @@ const verdictBadgeStyle: Record<string, string> = {
 };
 
 interface VerificationDetailData {
+  run_id?: string;
+  snapshot_id?: string;
   status: string;
   reason: string;
   condition_verdicts?: ConditionVerdict[];
@@ -181,7 +184,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
   onBack,
   onNavigateStep,
 }) => {
-  const { projectId, setAnalysisTarget } = useProject();
+  const { projectId, projectName, setAnalysisTarget } = useProject();
   const [error,setError] = useState('');
   const [isLoading, setIsLoading] = useState(true);
 
@@ -193,6 +196,27 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
   );
   const [selectedConditionId, setSelectedConditionId] = useState<string | null>(null);
   const [modalEvidence, setModalEvidence] = useState<CodeEvidence | null>(null);
+
+  const openDetail = (ev: EvidenceItem, lineHighlights?: Record<number, CodeLineHighlight>) => {
+    if (projectId && verificationData?.snapshot_id && isVsCodeEnvironment()) {
+      const jumped = requestJumpToLine({
+        projectId,
+        projectName: projectName ? projectName.replace(/^Project-/, "") : "Project",
+        snapshotId: verificationData.snapshot_id,
+        filePath: ev.file_path,
+        startLine: ev.start_line,
+        endLine: ev.end_line,
+      });
+      if (jumped) {
+        return;
+      }
+    }
+    setModalEvidence({
+      ...ev,
+      scope: ev.scope || (ev.role === 'problem' ? 'this_screen' : 'other_screen'),
+      lineHighlights,
+    });
+  };
 
   useEffect(() => {
     if (!projectId) return;
@@ -458,29 +482,21 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                         </p>
                         <button
                           type="button"
-                          onClick={() => setModalEvidence({
-                            ...ev,
-                            scope: ev.scope || (ev.role === 'problem' ? 'this_screen' : 'other_screen'),
-                            lineHighlights,
-                          })}
+                          onClick={() => openDetail(ev, lineHighlights)}
                           className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-700 border border-slate-200 transition-colors cursor-pointer"
-                          title="팝업창으로 코드 크게 보기"
+                          title="코드 상세보기"
                         >
                           <svg className="w-3.5 h-3.5 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
                           </svg>
-                          <span>팝업으로 크게 보기</span>
+                          <span>상세보기</span>
                         </button>
                       </div>
 
                       <div
                         className="mb-4 cursor-pointer group relative"
-                        onClick={() => setModalEvidence({
-                          ...ev,
-                          scope: ev.scope || (ev.role === 'problem' ? 'this_screen' : 'other_screen'),
-                          lineHighlights,
-                        })}
-                        title="클릭하여 팝업창으로 코드 크게 보기"
+                        onClick={() => openDetail(ev, lineHighlights)}
+                        title="클릭하여 코드 상세보기"
                       >
                         <CodeBlock
                           code={ev.code_snippet}
@@ -492,7 +508,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
                         />
                         <div className="absolute inset-0 bg-blue-500/0 group-hover:bg-blue-500/5 transition-colors rounded-lg pointer-events-none flex items-center justify-center">
                           <span className="opacity-0 group-hover:opacity-100 transition-opacity bg-slate-900/80 text-white text-xs px-3 py-1.5 rounded-full shadow-lg font-medium backdrop-blur-xs">
-                            클릭하여 팝업으로 크게 보기 ↗
+                            클릭하여 상세보기 ↗
                           </span>
                         </div>
                       </div>

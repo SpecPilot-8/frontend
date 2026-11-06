@@ -7,6 +7,8 @@ interface ProjectContextType {
   setAnalysisTarget: (value: { requirementId: string; documentId: string; revision: number } | null) => void;
   saveBeforeLeaveRef: MutableRefObject<(() => Promise<boolean>) | null>;
   projectId: string | null;
+  projectName: string;
+  setProjectName: (name: string) => void;
   unsavedChanges: boolean;
   setUnsavedChanges: (value: boolean) => void;
   navigationLocked: boolean;
@@ -18,6 +20,12 @@ const ProjectContext = createContext<ProjectContextType | undefined>(undefined);
 
 export const ProjectProvider = ({ children }: { children: ReactNode }) => {
   const [projectId, setProjectId] = useState<string | null>(() => localStorage.getItem("specpilot.projectId"));
+  const [projectName, setProjectNameState] = useState<string>(() => localStorage.getItem("specpilot.projectName") || "프로젝트 선택");
+
+  const setProjectName = (name: string) => {
+    localStorage.setItem("specpilot.projectName", name);
+    setProjectNameState(name);
+  };
 
   const saveBeforeLeaveRef = useRef<(() => Promise<boolean>) | null>(null);
   const [analysisTarget, setAnalysisTarget] = useState<ProjectContextType['analysisTarget']>(null);
@@ -25,11 +33,14 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
   const [navigationLocked,setNavigationLocked] = useState(false);
   const selectProject = (id: string | null) => {
     if (id) localStorage.setItem("specpilot.projectId", id);
-    else localStorage.removeItem("specpilot.projectId");
+    else {
+      localStorage.removeItem("specpilot.projectId");
+      localStorage.removeItem("specpilot.projectName");
+    }
     setProjectId(id);
   };
   return (
-    <ProjectContext.Provider value={{ analysisTarget, setAnalysisTarget, saveBeforeLeaveRef, projectId, setProjectId: selectProject, unsavedChanges, setUnsavedChanges, navigationLocked, setNavigationLocked }}>
+    <ProjectContext.Provider value={{ analysisTarget, setAnalysisTarget, saveBeforeLeaveRef, projectId, projectName, setProjectName, setProjectId: selectProject, unsavedChanges, setUnsavedChanges, navigationLocked, setNavigationLocked }}>
       {children}
     </ProjectContext.Provider>
   );

@@ -1,9 +1,11 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
+import { jumpToCodeLocation } from "./jump";
+import { restoreSnapshotCommand } from "./restoreCommand";
 
 export function activate(context: vscode.ExtensionContext) {
-  const disposable = vscode.commands.registerCommand(
+  const openDashboardCmd = vscode.commands.registerCommand(
     "specpilot.openDashboard",
     () => {
       const panel = vscode.window.createWebviewPanel(
@@ -36,7 +38,23 @@ export function activate(context: vscode.ExtensionContext) {
               </style>
           </head>
           <body>
-              <iframe src="http://localhost:5173/"></iframe>
+              <iframe id="specpilot-frame" src="http://localhost:5173/?host=vscode"></iframe>
+              <script>
+                  const vscode = acquireVsCodeApi();
+                  // 웹뷰 iframe에서 오는 메시지를 VS Code extension으로 중계
+                  window.addEventListener("message", (event) => {
+                      if (event.data && typeof event.data === "object") {
+                          vscode.postMessage(event.data);
+                      }
+                  });
+                  // 반대로 extension에서 오는 메시지를 iframe으로 전달 (양방향 대비)
+                  window.addEventListener("message-from-extension", (event) => {
+                      const frame = document.getElementById("specpilot-frame");
+                      if (frame && frame.contentWindow) {
+                          frame.contentWindow.postMessage(event.detail, "*");
+                      }
+                  });
+              </script>
           </body>
           </html>
         `;
@@ -45,11 +63,15 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       panel.webview.onDidReceiveMessage(
-        (message) => {
+        async (message) => {
           if (message.command === "jumpToLine") {
-            vscode.window.showInformationMessage(
-              `코드 점프 요청: ${message.filePath}:${message.line}`,
-            );
+            try {
+              await jumpToCodeLocation(message.payload);
+            } catch (error) {
+              vscode.window.showErrorMessage(
+                `SpecPilot 코드 이동 실패: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
           }
         },
         undefined,
@@ -58,7 +80,56 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
-  context.subscriptions.push(disposable);
+  // 수동 테스트용 점프 커맨드 (Ctrl+Shift+P 로 임의 위치 점프 테스트 가능)
+  const jumpTestCmd = vscode.commands.registerCommand(
+    "specpilot.testJumpToLocation",
+    async () => {
+      const projectName = await vscode.window.showInputBox({
+        prompt: "프로젝트명을 입력하세요 (예: Test1)",
+        value: "Test1",
+      });
+      if (!projectName) {
+        return;
+      }
+
+      const filePath = await vscode.window.showInputBox({
+        prompt: "상대 파일 경로를 입력하세요 (예: NoticeController.java 또는 src/main/...)",
+        value: "NoticeController.java",
+      });
+      if (!filePath) {
+        return;
+      }
+
+      const lineStr = await vscode.window.showInputBox({
+        prompt: "이동할 시작 줄 번호(startLine)를 입력하세요",
+        value: "1",
+      });
+      if (!lineStr) {
+        return;
+      }
+
+      try {
+        await jumpToCodeLocation({
+          projectId: "",
+          projectName,
+          snapshotId: "",
+          filePath,
+          startLine: parseInt(lineStr, 10) || 1,
+          endLine: (parseInt(lineStr, 10) || 1) + 2,
+        });
+      } catch (error) {
+        vscode.window.showErrorMessage(
+          `점프 실패: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    },
+  );
+
+  context.subscriptions.push(
+    openDashboardCmd,
+    vscode.commands.registerCommand("specpilot.restoreSnapshot", restoreSnapshotCommand),
+    jumpTestCmd,
+  );
 }
 
 function getWebviewContent(

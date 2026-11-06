@@ -12,11 +12,10 @@ import { ProjectProvider, useProject } from './contexts/ProjectContext';
 import { projectStackLabel } from './projectStacks';
 
 const Workspace: React.FC = () => {
-  const {unsavedChanges,setUnsavedChanges,navigationLocked,saveBeforeLeaveRef}=useProject();
-  const [pendingStep,setPendingStep] = useState<StepId | null>(null);
-  const [leaving,setLeaving] = useState(false);
+  const { unsavedChanges, setUnsavedChanges, navigationLocked, saveBeforeLeaveRef, projectName, setProjectName } = useProject();
+  const [pendingStep, setPendingStep] = useState<StepId | null>(null);
+  const [leaving, setLeaving] = useState(false);
   const [currentStep, setCurrentStep] = useState<StepId>('HOME');
-  const [projectName, setProjectName] = useState<string>('프로젝트 선택');
   const [techStack, setTechStack] = useState<string>('');
   const [selectedRequirementId, setSelectedRequirementId] = useState<string>('');
 
@@ -36,7 +35,7 @@ const Workspace: React.FC = () => {
   const handleProjectUpdated = useCallback((newProjectName: string, stack: string) => {
     setProjectName(newProjectName);
     setTechStack(projectStackLabel(stack));
-  }, []);
+  }, [setProjectName]);
 
   const handleSelectRequirementForTest = (reqId: string) => {
     setSelectedRequirementId(reqId);

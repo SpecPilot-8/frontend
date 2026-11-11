@@ -9,15 +9,42 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onCommand:specpilot.openDashboard",
+    "onCommand:specpilot.restoreSnapshot",
+    "onCommand:specpilot.testJumpToLocation"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "specpilot.openDashboard",
         "title": "SpecPilot: Open Dashboard"
+      },
+      {
+        "command": "specpilot.restoreSnapshot",
+        "title": "SpecPilot: Restore Snapshot Folder"
+      },
+      {
+        "command": "specpilot.testJumpToLocation",
+        "title": "SpecPilot: Test Jump To Location"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "SpecPilot",
+      "properties": {
+        "specpilot.workspaceRoot": {
+          "type": "string",
+          "default": "C:\\",
+          "description": "분석한 소스를 복원할 상위 폴더입니다. 프로젝트마다 이 아래에 프로젝트명으로 폴더를 만듭니다."
+        },
+        "specpilot.apiBaseUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000/api/v2",
+          "description": "SpecPilot 백엔드 API 주소입니다."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

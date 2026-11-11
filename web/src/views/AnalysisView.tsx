@@ -66,7 +66,6 @@ const operatorLabels: Record<string, string> = {
   ge: "≥ (이상)",
   gt: "> (초과)",
   eq: "= (일치)",
-  ne: "≠ (불일치)",
 };
 const field = "w-full border border-slate-200 rounded-lg p-2 text-sm bg-white";
 type Ref = {

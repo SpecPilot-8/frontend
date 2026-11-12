@@ -50,7 +50,6 @@ export const SetupView: React.FC<SetupViewProps> = ({
   });
 
   const [modelProfiles, setModelProfiles] = useState<AIModelProfile[]>([]);
-  const [codeSourceTab, setCodeSourceTab] = useState<"ZIP" | "GIT">("ZIP");
 
   const [connectionStatus, setConnectionStatus] = useState<
     "IDLE" | "CHECKING" | "SUCCESS" | "FAILED"
@@ -252,7 +251,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           setSetupData(prev => prev ? { ...prev, specFile: prev.specFile ? { ...prev.specFile, uploaded: true } : null } : prev);
         }
 
-        if (codeSourceTab === "ZIP" && codeFile) {
+        if (codeFile) {
           setSavingMessage("소스코드를 업로드하는 중...");
           const formData = new FormData();
           formData.append("file", codeFile);
@@ -319,7 +318,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       setIsSaving(false);
       setSavingMessage("");
     }
-  }, [setupData, projectId, specFile, codeSourceTab, codeFile, setProjectId, setUnsavedChanges, onProjectUpdated, isSaving]);
+  }, [setupData, projectId, specFile, codeFile, setProjectId, setUnsavedChanges, onProjectUpdated, isSaving]);
 
   useEffect(() => {
     saveBeforeLeaveRef.current = unsavedChanges ? handleSaveAndUpload : null;
@@ -494,74 +493,52 @@ export const SetupView: React.FC<SetupViewProps> = ({
               </div>
 
               <div className="space-y-2">
-                <label className={VIEW_HEADER.fieldLabel}>
-                  검증 대상 소스코드
-                </label>
-                <div className="flex items-center space-x-1.5">
-                  <Button
-                    type="button"
-                    variant={codeSourceTab === "ZIP" ? "primary" : "secondary"}
-                    size="sm"
-                    onClick={() => setCodeSourceTab("ZIP")}
-                  >
-                    ZIP 업로드
-                  </Button>
-                  <Button
-                    type="button"
-                    variant={codeSourceTab === "GIT" ? "primary" : "secondary"}
-                    size="sm"
-                    disabled
-                    title="원격 Git 가져오기는 후속 지원 예정입니다"
-                    onClick={() => setCodeSourceTab("GIT")}
-                  >
-                    Git 저장소
-                  </Button>
+                <div className="flex items-center justify-between">
+                  <label className={VIEW_HEADER.fieldLabel}>
+                    검증 대상 소스코드 (ZIP)
+                  </label>
+                  {isSourceUploaded && (
+                    <span className="text-[10px] font-semibold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
+                      {setupData.codeSource?.snapshotId ? "업로드 완료" : "파일 선택됨 · 저장 전"}
+                    </span>
+                  )}
                 </div>
 
-                {codeSourceTab === "ZIP" ? (
-                  isSourceUploaded ? (
-                    <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 mt-2 flex items-center justify-between">
-                      <div>
-                        <div className="text-xs font-medium text-slate-800">
-                          {setupData.codeSource?.sourceName}
-                        </div>
-                        <div className="text-[11px] text-slate-400 mt-0.5">
-                          {setupData.codeSource?.fileCount
-                            ? `${setupData.codeSource.fileCount}개 파일 · `
-                            : ""}
-                          {setupData.codeSource?.snapshotId ? `코드 스냅샷 ${setupData.codeSource.snapshotId}` : "파일 선택됨 · 저장 전"}
-                        </div>
+                {isSourceUploaded ? (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl p-3.5 flex items-center justify-between">
+                    <div>
+                      <div className="text-xs font-medium text-slate-800">
+                        {setupData.codeSource?.sourceName}
                       </div>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="md"
-                        onClick={openCodeFileDialog}
-                      >
-                        파일 교체
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="space-y-2 pt-1">
-                      <div className="p-3 border border-slate-200 rounded-lg text-xs text-slate-400 bg-white">
-                        아직 코드 파일을 선택하지 않았습니다.
+                      <div className="text-[11px] text-slate-400 mt-0.5">
+                        {setupData.codeSource?.fileCount
+                          ? `${setupData.codeSource.fileCount}개 파일 · `
+                          : ""}
+                        {setupData.codeSource?.snapshotId ? `코드 스냅샷 ${setupData.codeSource.snapshotId}` : "파일 선택됨 · 저장 전"}
                       </div>
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        size="md"
-                        onClick={openCodeFileDialog}
-                      >
-                        코드 ZIP 선택
-                      </Button>
                     </div>
-                  )
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="md"
+                      onClick={openCodeFileDialog}
+                    >
+                      파일 교체
+                    </Button>
+                  </div>
                 ) : (
-                  <div className="pt-1">
-                    <Input
-                      type="text"
-                      placeholder="https://github.com/organization/repository.git"
-                    />
+                  <div className="space-y-2 pt-1">
+                    <div className="p-3 border border-slate-200 rounded-lg text-xs text-slate-400 bg-white">
+                      아직 코드 파일을 선택하지 않았습니다.
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="md"
+                      onClick={openCodeFileDialog}
+                    >
+                      코드 ZIP 선택
+                    </Button>
                   </div>
                 )}
               </div>

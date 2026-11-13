@@ -7,6 +7,10 @@ import {
   jsonRequest,
   errorMessage,
   pollJobStatus,
+  saveActiveJob,
+  getActiveJob,
+  clearActiveJob,
+  APIError,
   BASE_URL,
 } from "../services/api";
 import { ParsingWarnings } from "../components/ParsingWarnings";
@@ -122,7 +126,7 @@ export const AnalysisView: React.FC<{
   const [conditions, setConditions] = useState<Condition[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [activeJobId, setActiveJobId] = useState("");
+  const [activeJobId, setActiveJobId] = useState<string>(() => (projectId ? getActiveJob(projectId, "extraction") || "" : ""));
   const [extractProgress, setExtractProgress] = useState<{
     completed: number;
     total: number;
@@ -231,25 +235,34 @@ export const AnalysisView: React.FC<{
       .then(load)
       .catch((e) => setMessage(errorMessage(e)));
   }, [load]);
+
   useEffect(() => {
     if (!activeJobId || !projectId) return;
     let active = true;
+    const controller = new AbortController();
+
     void Promise.resolve().then(async () => {
       setBusy(true);
       try {
-        const done = (await pollJobStatus(projectId, activeJobId, (job) => {
-          if (active) {
-            if (job.progress) {
-              setExtractProgress(job.progress);
-              setMessage(
-                `AI 요구사항 추출 중 · 화면 ${job.progress.completed}/${job.progress.total}`,
-              );
-            } else {
-              setMessage("AI 요구사항 추출 대기 중");
+        const done = (await pollJobStatus(
+          projectId,
+          activeJobId,
+          (job) => {
+            if (active) {
+              if (job.progress) {
+                setExtractProgress(job.progress);
+                setMessage(
+                  `AI 요구사항 추출 중 · 화면 ${job.progress.completed}/${job.progress.total}`,
+                );
+              } else {
+                setMessage("AI 요구사항 추출 대기 중");
+              }
             }
-          }
-        })) as ExtractionJob;
+          },
+          { signal: controller.signal },
+        )) as ExtractionJob;
         if (!active) return;
+        clearActiveJob(projectId, "extraction");
         await load();
         setMessage(
           done.status === "completed"
@@ -259,7 +272,11 @@ export const AnalysisView: React.FC<{
                 `분석 상태: ${done.status}`,
         );
       } catch (e) {
-        if (active) setMessage(errorMessage(e));
+        if (active) {
+          if (e instanceof APIError && e.code === "ABORTED") return;
+          clearActiveJob(projectId, "extraction");
+          setMessage(errorMessage(e));
+        }
       } finally {
         if (active) {
           setBusy(false);
@@ -270,6 +287,7 @@ export const AnalysisView: React.FC<{
     });
     return () => {
       active = false;
+      controller.abort();
     };
   }, [activeJobId, projectId, load]);
   useEffect(() => {
@@ -471,7 +489,10 @@ export const AnalysisView: React.FC<{
           accept_warnings: warningAccepted,
         }),
       );
-      if (["queued", "running"].includes(job.status)) setActiveJobId(job.id);
+      if (["queued", "running"].includes(job.status)) {
+        if (projectId) saveActiveJob(projectId, "extraction", job.id);
+        setActiveJobId(job.id);
+      }
       else {
         setMessage(
           job.error?.message ||

@@ -15,11 +15,41 @@ const Workspace: React.FC = () => {
   const { unsavedChanges, setUnsavedChanges, navigationLocked, saveBeforeLeaveRef, projectName, setProjectName } = useProject();
   const [pendingStep, setPendingStep] = useState<StepId | null>(null);
   const [leaving, setLeaving] = useState(false);
-  const [currentStep, setCurrentStep] = useState<StepId>('HOME');
-  const [techStack, setTechStack] = useState<string>('');
+  const [currentStep, setCurrentStep] = useState<StepId>(() => {
+    try {
+      const saved = sessionStorage.getItem('specpilot.currentStep') as StepId | null;
+      const hasProject = Boolean(localStorage.getItem('specpilot.projectId'));
+      if (saved && hasProject && ['SETUP', 'ANALYSIS', 'VERIFICATION', 'TEST_SPEC'].includes(saved)) {
+        return saved;
+      }
+    } catch {
+      // ignore
+    }
+    return 'HOME';
+  });
+  const [techStack, setTechStack] = useState<string>(() => {
+    try {
+      return localStorage.getItem('specpilot.techStack') || '';
+    } catch {
+      return '';
+    }
+  });
   const [selectedRequirementId, setSelectedRequirementId] = useState<string>('');
 
-  const finishNavigation = (step: StepId) => { setUnsavedChanges(false); setPendingStep(null); setCurrentStep(step); };
+  const finishNavigation = (step: StepId) => {
+    setUnsavedChanges(false);
+    setPendingStep(null);
+    setCurrentStep(step);
+    try {
+      if (step === 'HOME') {
+        sessionStorage.removeItem('specpilot.currentStep');
+      } else {
+        sessionStorage.setItem('specpilot.currentStep', step);
+      }
+    } catch {
+      // ignore
+    }
+  };
   const navigate = (step: StepId) => {
     if(navigationLocked) return;
     if(unsavedChanges) {setPendingStep(step); return;}
@@ -29,20 +59,37 @@ const Workspace: React.FC = () => {
     setProjectName(`Project-${projectId}`);
     setTechStack('');
     setSelectedRequirementId('');
+    try {
+      localStorage.removeItem('specpilot.techStack');
+    } catch {
+      // ignore
+    }
     navigate('SETUP');
   };
 
   const handleProjectUpdated = useCallback((newProjectName: string, stack: string) => {
     setProjectName(newProjectName);
-    setTechStack(projectStackLabel(stack));
+    const label = projectStackLabel(stack);
+    try {
+      localStorage.setItem('specpilot.techStack', label);
+    } catch {
+      // ignore
+    }
+    setTechStack(label);
   }, [setProjectName]);
 
   const handleSelectRequirementForTest = (reqId: string) => {
     setSelectedRequirementId(reqId);
-    setCurrentStep('TEST_SPEC');
+    navigate('TEST_SPEC');
   };
 
   const handleSwitchProject = () => {
+    try {
+      sessionStorage.removeItem('specpilot.currentStep');
+      localStorage.removeItem('specpilot.techStack');
+    } catch {
+      // ignore
+    }
     navigate('HOME');
   };
 

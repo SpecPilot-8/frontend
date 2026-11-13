@@ -2,7 +2,18 @@ import React, { useCallback, useEffect, useState } from 'react';
 import type { StepId, RequirementItem } from '../types';
 import { formatRequirementTitle } from '../types/verification';
 import { useProject } from '../contexts/ProjectContext';
-import { api, fetchAll, jsonRequest, errorMessage, pollJobStatus, BASE_URL } from '../services/api';
+import {
+  api,
+  fetchAll,
+  jsonRequest,
+  errorMessage,
+  pollJobStatus,
+  saveActiveJob,
+  getActiveJob,
+  clearActiveJob,
+  APIError,
+  BASE_URL,
+} from '../services/api';
 import { Button, Card, PageHeader } from '../components/common';
 import { VerificationDetail } from '../components/verification/VerificationDetail';
 import { VerificationScopeDialog } from '../components/verification/VerificationScopeDialog';
@@ -37,7 +48,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   const [filter, setFilter] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const [activeJob, setActiveJob] = useState('');
+  const [activeJob, setActiveJob] = useState<string>(() => (projectId ? getActiveJob(projectId, 'verification') || '' : ''));
   const [cancellingJob, setCancellingJob] = useState(false);
   const [verifyProgress, setVerifyProgress] = useState<{ completed: number; total: number; stage?: string } | null>(null);
   const [refresh, setRefresh] = useState(0);
@@ -67,29 +78,48 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     }
     return () => { active = false; };
   }, [runId, base, filter, search, refresh]);
+
   useEffect(() => {
     if (!activeJob || !projectId) return;
     let active = true;
     let lastProgress = '';
+    const controller = new AbortController();
+
     void Promise.resolve().then(async () => {
       setBusy(true);
       try {
-        const done = await pollJobStatus(projectId, activeJob, job => {
-          if (!active) return;
-          const progress = job.progress;
-          setVerifyProgress(progress || null);
-          setMessage(progress ? `${stages[progress.stage] || progress.stage} · 요구사항 ${progress.completed}/${progress.total}` : '코드 검증 대기 중');
-          const stamp = JSON.stringify(progress);
-          if (stamp !== lastProgress) { lastProgress = stamp; setRefresh(n => n + 1); }
-        }) as Job;
+        const done = await pollJobStatus(
+          projectId,
+          activeJob,
+          job => {
+            if (!active) return;
+            const progress = job.progress;
+            setVerifyProgress(progress || null);
+            setMessage(progress ? `${stages[progress.stage] || progress.stage} · 요구사항 ${progress.completed}/${progress.total}` : '코드 검증 대기 중');
+            const stamp = JSON.stringify(progress);
+            if (stamp !== lastProgress) { lastProgress = stamp; setRefresh(n => n + 1); }
+          },
+          { signal: controller.signal },
+        ) as Job;
         if (!active) return;
+        clearActiveJob(projectId, 'verification');
         await load(); setRefresh(n => n + 1);
         setMessage(done.status === 'completed' ? '조건별 코드 판정을 완료했습니다. 추적표와 원문·코드 근거를 확인하세요. 실제 실행 테스트 결과와는 구분됩니다.'
           : done.error?.message || done.missing_features?.map(f => f.message).join(' / ') || `검증 상태: ${done.status}`);
-      } catch (e) { if (active) setMessage(errorMessage(e)); }
-      finally { if (active) { setBusy(false); setActiveJob(''); setVerifyProgress(null); } }
+      } catch (e) {
+        if (active) {
+          if (e instanceof APIError && e.code === 'ABORTED') return;
+          clearActiveJob(projectId, 'verification');
+          setMessage(errorMessage(e));
+        }
+      } finally {
+        if (active) { setBusy(false); setActiveJob(''); setVerifyProgress(null); }
+      }
     });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      controller.abort();
+    };
   }, [activeJob, projectId, load]);
 
   const fetchVerificationInput = async () => {
@@ -138,6 +168,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       await load();
       if (job.result_ref) setRunId(job.result_ref.id);
       if (['queued', 'running'].includes(job.status)) {
+        if (projectId) saveActiveJob(projectId, 'verification', job.id);
         setActiveJob(job.id);
       } else {
         setMessage(job.error?.message || job.missing_features?.map(f => f.message).join(' / ') || '검증 실패');
@@ -167,6 +198,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     if (!projectId || !activeJob || cancellingJob) return;
     if (!window.confirm('진행 중인 코드 정합성 검증 작업을 중단하시겠습니까?')) return;
     setCancellingJob(true);
+    if (projectId) clearActiveJob(projectId, 'verification');
     try {
       await api(`${base}/jobs/${activeJob}/cancel`, jsonRequest('POST', {}));
       setMessage('코드 검증 작업을 사용자가 중단했습니다.');
@@ -189,7 +221,10 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       const job = await api<Job>(`${base}/verification-runs`, jsonRequest('POST', { ...pendingInput, scope_config: scope }));
       setScopeOptions(null); setPendingInput(null); setSelected(null); setSearch(''); setFilter('');
       await load(); if (job.result_ref) setRunId(job.result_ref.id);
-      if (['queued', 'running'].includes(job.status)) setActiveJob(job.id);
+      if (['queued', 'running'].includes(job.status)) {
+        if (projectId) saveActiveJob(projectId, 'verification', job.id);
+        setActiveJob(job.id);
+      }
       else { setMessage(job.error?.message || job.missing_features.map(f => f.message).join(' / ')); setBusy(false); }
     } catch (e) { setMessage(errorMessage(e)); setBusy(false); }
   };

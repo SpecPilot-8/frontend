@@ -13,13 +13,19 @@ export const BASE_URL =
 
 export class APIError extends Error {
   code?: string;
+  status?: number;
   details?: unknown;
   missing_features?: unknown[];
   
-  constructor(message: string, errorData?: { code?: string, details?: unknown, missing_features?: unknown[] }) {
+  constructor(
+    message: string,
+    errorData?: { code?: string; details?: unknown; missing_features?: unknown[]; status?: number },
+    status?: number,
+  ) {
     super(message);
     this.name = 'APIError';
     this.code = errorData?.code;
+    this.status = status ?? errorData?.status;
     this.details = errorData?.details;
     this.missing_features = errorData?.missing_features;
   }
@@ -30,7 +36,8 @@ export const handleResponse = async (res: Response) => {
     const errorData = await res.json().catch(() => ({}));
     throw new APIError(
       errorData.error?.message || `서버 통신 에러가 발생했습니다. (${res.status})`,
-      errorData.error
+      errorData.error,
+      res.status,
     );
   }
   return res.json();
@@ -214,6 +221,21 @@ export function clearActiveJob(projectId: string, task: JobTaskType) {
   }
 }
 
+export function isNetworkOrTimeoutError(error: unknown): boolean {
+  if (error instanceof APIError) {
+    if (error.code === "NETWORK_ERROR" || error.code === "POLLING_TIMEOUT") {
+      return true;
+    }
+    if (error.status && [502, 503, 504].includes(error.status)) {
+      return true;
+    }
+  }
+  if (error instanceof TypeError && error.message.toLowerCase().includes("fetch")) {
+    return true;
+  }
+  return false;
+}
+
 export interface PollJobOptions {
   signal?: AbortSignal;
   maxConsecutiveErrors?: number;
@@ -263,7 +285,11 @@ export async function pollJobStatus(
       if (options?.signal?.aborted) {
         throw new APIError("작업 조회가 중단되었습니다.", { code: "ABORTED" });
       }
-      if (error instanceof APIError && error.code !== "POLLING_TIMEOUT") throw error;
+      if (error instanceof APIError && error.code !== "POLLING_TIMEOUT") {
+        if (!error.status || ![502, 503, 504].includes(error.status)) {
+          throw error;
+        }
+      }
       consecutiveErrors++;
       console.error(
         `Job 폴링 중 네트워크 에러 (${consecutiveErrors}/${maxConsecutiveErrors}):`,

@@ -17,6 +17,7 @@ import {
   saveActiveJob,
   getActiveJob,
   clearActiveJob,
+  isNetworkOrTimeoutError,
   APIError,
   BASE_URL,
 } from "../services/api";
@@ -408,9 +409,11 @@ export const TestSpecView: React.FC<{
       } catch (e) {
         if (active) {
           if (e instanceof APIError && e.code === "ABORTED") return;
-          clearActiveJob(projectId, "test_generation");
+          if (!isNetworkOrTimeoutError(e)) {
+            clearActiveJob(projectId, "test_generation");
+          }
           setMessage(
-            `${errorMessage(e)} · 화면에 다시 들어오면 생성 진행을 조회합니다. 자동으로 재생성하지 않습니다.`,
+            `${errorMessage(e)} · 화면에 다시 들어오거나 새로고침하면 진행 상태를 다시 조회합니다. 자동으로 재생성하지 않습니다.`,
           );
         }
       } finally {

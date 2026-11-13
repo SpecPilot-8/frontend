@@ -11,6 +11,7 @@ import {
   saveActiveJob,
   getActiveJob,
   clearActiveJob,
+  isNetworkOrTimeoutError,
   APIError,
   BASE_URL,
 } from '../services/api';
@@ -109,7 +110,9 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       } catch (e) {
         if (active) {
           if (e instanceof APIError && e.code === 'ABORTED') return;
-          clearActiveJob(projectId, 'verification');
+          if (!isNetworkOrTimeoutError(e)) {
+            clearActiveJob(projectId, 'verification');
+          }
           setMessage(errorMessage(e));
         }
       } finally {

@@ -10,6 +10,7 @@ import {
   saveActiveJob,
   getActiveJob,
   clearActiveJob,
+  isNetworkOrTimeoutError,
   APIError,
   BASE_URL,
 } from "../services/api";
@@ -274,7 +275,9 @@ export const AnalysisView: React.FC<{
       } catch (e) {
         if (active) {
           if (e instanceof APIError && e.code === "ABORTED") return;
-          clearActiveJob(projectId, "extraction");
+          if (!isNetworkOrTimeoutError(e)) {
+            clearActiveJob(projectId, "extraction");
+          }
           setMessage(errorMessage(e));
         }
       } finally {

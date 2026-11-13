@@ -186,23 +186,66 @@ export const fetchTestSpecifications = async (projectId: string) => {
   return (await fetchAll<TestSpecification>(`/projects/${projectId}/test-specifications`)).reverse();
 };
 
+const ACTIVE_JOB_PREFIX = "specpilot:activeJob:";
+
+export type JobTaskType = "extraction" | "verification" | "test_generation";
+
+export function saveActiveJob(projectId: string, task: JobTaskType, jobId: string) {
+  try {
+    sessionStorage.setItem(`${ACTIVE_JOB_PREFIX}${projectId}:${task}`, jobId);
+  } catch (e) {
+    console.warn("세션 스토리지에 Job ID 저장 실패:", e);
+  }
+}
+
+export function getActiveJob(projectId: string, task: JobTaskType): string | null {
+  try {
+    return sessionStorage.getItem(`${ACTIVE_JOB_PREFIX}${projectId}:${task}`);
+  } catch {
+    return null;
+  }
+}
+
+export function clearActiveJob(projectId: string, task: JobTaskType) {
+  try {
+    sessionStorage.removeItem(`${ACTIVE_JOB_PREFIX}${projectId}:${task}`);
+  } catch (e) {
+    console.warn("세션 스토리지 Job ID 삭제 실패:", e);
+  }
+}
+
+export interface PollJobOptions {
+  signal?: AbortSignal;
+  maxConsecutiveErrors?: number;
+}
+
 export async function pollJobStatus(
   projectId: string,
   jobId: string,
   onProgress?: (job: {
     progress?: { stage: string; completed: number; total: number };
+    status?: string;
   }) => void,
+  options?: PollJobOptions,
 ): Promise<unknown> {
   const maxAttempts = 900; 
   let attempts = 0;
   let delay = 1000;
+  let consecutiveErrors = 0;
+  const maxConsecutiveErrors = options?.maxConsecutiveErrors ?? 5;
 
   while (attempts < maxAttempts) {
+    if (options?.signal?.aborted) {
+      throw new APIError("작업 조회가 중단되었습니다.", { code: "ABORTED" });
+    }
+
     try {
       const res = await fetch(
         `${BASE_URL}/projects/${projectId}/jobs/${jobId}`,
+        { signal: options?.signal },
       );
       const job = await handleResponse(res);
+      consecutiveErrors = 0;
 
       if (onProgress) {
         onProgress(job);
@@ -217,12 +260,40 @@ export async function pollJobStatus(
         return job;
       }
     } catch (error) {
+      if (options?.signal?.aborted) {
+        throw new APIError("작업 조회가 중단되었습니다.", { code: "ABORTED" });
+      }
       if (error instanceof APIError && error.code !== "POLLING_TIMEOUT") throw error;
-      console.error("Job 폴링 중 네트워크 에러 (재시도 중):", error);
+      consecutiveErrors++;
+      console.error(
+        `Job 폴링 중 네트워크 에러 (${consecutiveErrors}/${maxConsecutiveErrors}):`,
+        error,
+      );
+
+      if (consecutiveErrors >= maxConsecutiveErrors) {
+        throw new APIError(
+          "서버와의 연결이 끊겨 작업 진행 상태를 확인할 수 없습니다. 서버 상태를 확인하고 새로고침해 주세요.",
+          { code: "NETWORK_ERROR" },
+        );
+      }
+
       delay = Math.min(delay * 1.5, 5000);
     }
 
-    await new Promise((resolve) => setTimeout(resolve, delay));
+    if (options?.signal?.aborted) {
+      throw new APIError("작업 조회가 중단되었습니다.", { code: "ABORTED" });
+    }
+
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, delay);
+      if (options?.signal) {
+        const onAbort = () => {
+          clearTimeout(timer);
+          reject(new APIError("작업 조회가 중단되었습니다.", { code: "ABORTED" }));
+        };
+        options.signal.addEventListener("abort", onAbort, { once: true });
+      }
+    });
     attempts++;
   }
 

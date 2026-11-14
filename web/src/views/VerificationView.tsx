@@ -21,11 +21,36 @@ import { VerificationScopeDialog } from '../components/verification/Verification
 import { VerificationLoadingModal } from '../components/verification/VerificationLoadingModal';
 import type { ScopeOptions, VerificationScope } from '../components/verification/VerificationScopeDialog';
 
-interface Run { id: string; created_at: string; snapshot_id: string; status: string }
+interface StageMetrics { calls?: number; submitted_chunks?: number; duration_ms?: number; usage?: Record<string, number> }
+interface AnalysisMetrics { scope_duration_ms?: number | null; matching?: StageMetrics; condition_judgment?: StageMetrics }
+interface Run { id: string; created_at: string; snapshot_id: string; status: string; job_id?: string; model_config_snapshot?: { provider?: string; model?: string } }
 interface Row { requirement_id: string; requirement_revision: number; stable_key: string; title: string; topic_title: string; subtopic_title: string; analysis_state: string; status: string | null; reason: string; evidence_count: number }
 interface RunInput { snapshot_id: string; requirement_versions: { requirement_id: string; revision: number }[]; model_config_version: number }
-interface Job { id: string; operation: string; status: string; result_ref?: { id: string }; error?: { message: string }; missing_features: { message: string }[] }
+interface Job { id: string; operation: string; status: string; result_ref?: { id: string }; error?: { message: string }; missing_features: { message: string }[]; usage?: Record<string, number>; analysis_metrics?: AnalysisMetrics }
 const labels: Record<string, string> = { implemented: '구현됨', partial: '부분 구현', mismatch: '불일치', not_found: '미구현 후보', needs_review: '확인 필요', not_statically_verifiable: '정적 검증 불가', not_run: '미분석' };
+const runStatusLabel: Record<string, string> = { completed: '완료', running: '분석 중', failed: '실패', queued: '대기', blocked: '미연결', cancelled: '중단' };
+const formatRunDate = (isoString: string) => {
+  try {
+    const d = new Date(isoString);
+    if (isNaN(d.getTime())) return isoString;
+    const m = d.getMonth() + 1;
+    const day = d.getDate();
+    const h = String(d.getHours()).padStart(2, '0');
+    const min = String(d.getMinutes()).padStart(2, '0');
+    return `${m}월 ${day}일 ${h}:${min}`;
+  } catch {
+    return isoString;
+  }
+};
+const formatDuration = (ms: number) => {
+  const totalSec = Math.round(ms / 1000);
+  if (totalSec >= 60) {
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return sec > 0 ? `${min}분 ${sec}초` : `${min}분`;
+  }
+  return `${(ms / 1000).toFixed(1)}초`;
+};
 const statusBadgeStyles: Record<string, string> = {
   implemented: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   partial: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -40,6 +65,7 @@ const stages: Record<string, string> = { queued: '대기', scope_analysis: '화�
 export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void; onSelectRequirementForTest?: (id: string) => void }> = ({ onNavigateStep, onSelectRequirementForTest }) => {
   const { projectId } = useProject();
   const [runs, setRuns] = useState<Run[]>([]);
+  const [jobMap, setJobMap] = useState<Record<string, Job>>({});
   const [runId, setRunId] = useState('');
   const [rows, setRows] = useState<Row[]>([]);
   const [reqMap, setReqMap] = useState<Record<string, RequirementItem>>({});
@@ -65,6 +91,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       fetchAll<RequirementItem>(`/projects/${projectId}/requirements`).catch(() => [] as RequirementItem[]),
     ]);
     items.reverse(); setRuns(items); setRunId(prev => items.some(r => r.id === prev) ? prev : items[0]?.id || '');
+    setJobMap(Object.fromEntries(jobs.map(j => [j.id, j])));
     setReqMap(Object.fromEntries(reqs.map(r => [r.id, r])));
     const pending = jobs.find(j => j.operation === 'verify' && ['queued', 'running'].includes(j.status));
     if (pending) { setActiveJob(pending.id); if (pending.result_ref) setRunId(pending.result_ref.id); }
@@ -245,6 +272,11 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   if (!projectId) return <Button onClick={() => onNavigateStep('SETUP')}>프로젝트를 선택하세요</Button>;
   if (selected) return <VerificationDetail requirementId={selected.requirement_id} requirementRevision={selected.requirement_revision} runId={runId} onBack={() => setSelected(null)} onNavigateStep={onNavigateStep} onSelectForTest={() => onSelectRequirementForTest?.(selected.requirement_id)} />;
   const run = runs.find(r => r.id === runId);
+  const runJob = run ? (run.job_id ? jobMap[run.job_id] : Object.values(jobMap).find(j => j.result_ref?.id === run.id)) : undefined;
+  const metrics = runJob?.analysis_metrics;
+  const totalInputTokens = runJob?.usage?.input_tokens ?? ((metrics?.matching?.usage?.input_tokens || 0) + (metrics?.condition_judgment?.usage?.input_tokens || 0));
+  const totalOutputTokens = runJob?.usage?.output_tokens ?? ((metrics?.matching?.usage?.output_tokens || 0) + (metrics?.condition_judgment?.usage?.output_tokens || 0));
+  const totalDurationMs = (metrics?.scope_duration_ms || 0) + (metrics?.matching?.duration_ms || 0) + (metrics?.condition_judgment?.duration_ms || 0);
   return <div className="max-w-7xl mx-auto space-y-5">
     <VerificationLoadingModal
       isOpen={!!activeJob}
@@ -271,19 +303,26 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       <Button variant="secondary" onClick={() => onNavigateStep('SETUP')}>모델·코드 설정</Button>
       <Button variant="secondary" onClick={() => onNavigateStep('TEST_SPEC')}>테스트 사양서로 이동</Button>
     </div>
-    <Card title="요구사항 추적표" description={run ? `실행 상태: ${run.status} · 스냅샷 ${run.snapshot_id}` : '아직 검증 실행이 없습니다'}>
+    <Card title="요구사항 추적표" description={run ? `실행 상태: ${runStatusLabel[run.status] || run.status}${run.model_config_snapshot?.model ? ` · 모델 ${run.model_config_snapshot.model}` : ''} · 스냅샷 ${run.snapshot_id}` : '아직 검증 실행이 없습니다'}>
       <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-slate-50/80 border border-slate-200/80 rounded-xl mb-3">
         <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0">
-          <select aria-label="검증 실행 선택" value={runId} disabled={busy} onChange={e => { setRunId(e.target.value); setMessage(''); }} className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-white shadow-2xs focus:outline-none focus:border-blue-500 max-w-xs truncate">{runs.map(r => <option key={r.id} value={r.id}>{r.created_at} · {r.status}</option>)}</select>
+          <select aria-label="검증 실행 선택" value={runId} disabled={busy} onChange={e => { setRunId(e.target.value); setMessage(''); }} className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-white shadow-2xs focus:outline-none focus:border-blue-500 max-w-xs truncate">{runs.map(r => <option key={r.id} value={r.id}>{formatRunDate(r.created_at)} · {runStatusLabel[r.status] || r.status}</option>)}</select>
           <input aria-label="추적표 검색" placeholder="기능·주제 검색" value={search} onChange={e => setSearch(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-white shadow-2xs focus:outline-none focus:border-blue-500 w-52" />
           <select aria-label="판정 필터" value={filter} onChange={e => setFilter(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-white shadow-2xs focus:outline-none focus:border-blue-500"><option value="">전체</option>{Object.entries(labels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
         </div>
         <Button disabled={!runId || busy} onClick={exportTrace} className="whitespace-nowrap shadow-2xs">실행 전체 Excel 출력</Button>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-1">
-        <p className="text-xs font-medium text-slate-700 bg-slate-100/80 border border-slate-200/70 px-3 py-1.5 rounded-lg">
-          선택 범위 <strong className="text-slate-900">{summary.total || 0}건</strong> · 구현됨 <strong className="text-emerald-600">{summary.implemented || 0}건</strong> · 구현율 <strong className="text-blue-600">{(summary.implementation_rate || 0).toFixed(1)}%</strong> · 미분석 <strong className="text-slate-500">{summary.not_run || 0}건</strong>
-        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <p className="text-xs font-medium text-slate-700 bg-slate-100/80 border border-slate-200/70 px-3 py-1.5 rounded-lg">
+            선택 범위 <strong className="text-slate-900">{summary.total || 0}건</strong> · 구현됨 <strong className="text-emerald-600">{summary.implemented || 0}건</strong> · 구현율 <strong className="text-blue-600">{(summary.implementation_rate || 0).toFixed(1)}%</strong> · 미분석 <strong className="text-slate-500">{summary.not_run || 0}건</strong>
+          </p>
+          {(totalInputTokens > 0 || totalOutputTokens > 0 || totalDurationMs > 0) && (
+            <p className="text-xs font-medium text-slate-600 bg-blue-50/60 border border-blue-200/70 px-3 py-1.5 rounded-lg">
+              입력 <strong className="text-slate-800">{totalInputTokens.toLocaleString()}</strong> · 출력 <strong className="text-slate-800">{totalOutputTokens.toLocaleString()}</strong> 토큰{totalDurationMs > 0 ? <> · 처리시간 <strong className="text-slate-800">{formatDuration(totalDurationMs)}</strong></> : null}
+            </p>
+          )}
+        </div>
         <p className="text-xs text-slate-400">Excel은 현재 검색·필터와 관계없이 선택한 검증 실행 전체를 출력합니다.</p>
       </div>
       <div className={`rounded-xl border border-slate-200 overflow-auto ${rows.length > 10 ? 'max-h-160' : ''}`}>
@@ -315,7 +354,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
                     <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold border ${statusBadgeStyles[statusKey] || statusBadgeStyles.not_run}`}>
                       {labels[statusKey]}
                     </span>
-                    <small className="block mt-1 text-[11px] text-slate-400">{r.analysis_state}</small>
+                    <small className="block mt-1 text-[11px] text-slate-400">{runStatusLabel[r.analysis_state] || r.analysis_state}</small>
                   </td>
                   <td className="px-3 py-3.5 align-middle text-center whitespace-nowrap">
                     <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-md text-xs font-semibold ${r.evidence_count > 0 ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-slate-100 text-slate-500'}`}>

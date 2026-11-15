@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 선택한 테스트 케이스와 요구사항 수락 조건을 나란히 대조하고 설계 적합성을 검토하는 컴포넌트
+ * - 주요 기능:
+ *   1) 시험에 연결된 요구사항 원문과 수락 조건별 테스트 단계 비교 표시
+ *   2) 조건별 사용자 설계 적합성 검토 기록 조회 및 검토 다이얼로그 연동
+ */
+
 import { useEffect, useState } from 'react';
 import { Button, Card } from '../common';
 import { api, errorMessage } from '../../services/api';
@@ -22,6 +31,7 @@ export function TestRequirementComparison({projectId, versions, requirements, ca
   const [error, setError] = useState('');
   const [reload, setReload] = useState(0);
   const [target, setTarget] = useState<{requirement_id:string;requirement_revision:number;condition_id:string} | null>(null);
+  // 선택한 시험의 사용자 설계 검토 기록을 불러오는 로직
   useEffect(() => {
     const controller = new AbortController();
     void Promise.resolve().then(async () => {
@@ -45,7 +55,7 @@ export function TestRequirementComparison({projectId, versions, requirements, ca
   const selectedCondition = all.flatMap(r=>r.conditions.map(c=>({r,c}))).find(({r,c})=>r.version.requirement_id===target?.requirement_id&&r.version.revision===target?.requirement_revision&&c.condition.id===target?.condition_id);
   return <aside aria-label="요구사항과 시험 대조" className="min-w-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
     <Card title="요구사항·수락 조건 대조" description="시험 절차와 기대 결과를 옆에서 비교합니다." className="min-w-0">
-      <div className="space-y-3 text-sm leading-7 [overflow-wrap:anywhere]">
+      <div className="space-y-3 text-sm leading-7 wrap-anywhere">
         <p className="text-xs text-slate-500">{test.test_no} · 절차 개정 {test.revision}</p>
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-6"><p>사양서 전체 조건 {flat.length}개 중 시험 연결 {flat.filter(c=>c.selected.length||c.other.length).length}개</p><p>선택한 시험에 연결된 조건 {flat.filter(c=>c.selected.length).length}개</p></div>
         <details className="text-xs leading-6 text-slate-500"><summary className="cursor-pointer">조건 연결과 설계 검토의 의미</summary><p className="mt-1">연결은 해당 시험이 조건을 확인하도록 지정됐다는 뜻입니다. 절차와 기대 결과가 충분한지는 아래 사용자 검토로 기록하고, 실제 구현 충족은 시험 수행 결과로 확인합니다.</p></details>

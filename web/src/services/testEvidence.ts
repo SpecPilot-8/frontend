@@ -1,3 +1,13 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 테스트 케이스에 연결된 요구사항과 원문 출처 근거를 해석하는 파일
+ * - 주요 기능:
+ *   1) 시험에 고정된 요구사항 개정과 수락 조건 매핑
+ *   2) 수락 조건 및 요구사항의 원문 출처 추출
+ *   3) 현재 시험 개정과 생성 당시 설계 설명의 일치 여부 확인
+ */
+
 import type { RequirementItem, SourceReference } from '../types/analysis';
 import type { RequirementLink, TestCase } from '../types/test';
 
@@ -9,7 +19,7 @@ export type TestRequirement = RequirementItem & {
   review_reasons?: string[];
 };
 
-/** 시험에 고정된 개정과 조건 ID만 해석한다. 최신 요구사항으로 대체하지 않는다. */
+// 시험에 연결된 요구사항 개정과 수락 조건을 묶어주는 로직
 export function resolveTestEvidence(links: RequirementLink[], requirements: TestRequirement[]) {
   const grouped = new Map<string, RequirementLink>();
   for (const link of links) {

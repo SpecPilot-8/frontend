@@ -1,4 +1,12 @@
-// 코드 근거 항목
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 코드 검증 결과와 근거 항목 타입 및 요구사항 제목 요약 함수를 정의한 파일
+ * - 주요 기능:
+ *   1) 코드 근거 항목과 검증 결과 인터페이스 정의
+ *   2) 요구사항 원문과 수락 조건에서 핵심 키워드를 추출해 기능명을 생성하는 처리
+ */
+
 export interface CodeEvidence {
   id: string;
   filePath: string;
@@ -11,7 +19,6 @@ export interface CodeEvidence {
   [key: string]: unknown;
 }
 
-// 검증 결과 개별 항목
 export interface VerificationResultItem {
   id: string;
   requirementId: string;
@@ -42,7 +49,6 @@ export interface Requirement {
   title?: string;
   original_text: string;
   source_refs?: SourceRef[];
-  // 원본 PDF 조회용 (GET /documents/{document_id}/file)
   document_id?: string;
 }
 
@@ -99,6 +105,7 @@ function findEarliestKeyword(text: string, keywords: string[]): string {
   return best;
 }
 
+// 요구사항 원문에서 핵심 명사와 동작을 추출해 기능명을 만드는 로직
 export function formatRequirementTitle(
   rawTitle?: string,
   originalText?: string,
@@ -152,12 +159,10 @@ export function formatRequirementTitle(
 
   let targetNoun = '';
 
-  // 1. 콜론(:) 앞에 명시된 항목/컴포넌트 라벨 (화면명 단순 반복이 아닌 경우 최우선)
   if (colonHead && !GENERIC_WORDS.has(colonHead)) {
     targetNoun = colonHead;
   }
 
-  // 2. "<대상> 클릭/선택/터치 시" 패턴
   if (!targetNoun) {
     const triggerMatch = firstClause.match(
       /([가-힣A-Za-z0-9]{2,10}?(?:\s+(?:버튼|링크|아이콘|메뉴|탭|입력창|입력란|필드|체크박스|토글|화면|팝업|항목))?)(?:을|를|이|가)?\s*(?:클릭|선택|터치)\s*(?:할\s*경우|시|하면)/,
@@ -172,17 +177,14 @@ export function formatRequirementTitle(
     }
   }
 
-  // 3. 첫 문장에서 가장 먼저 등장하는 핵심 복합 명사 키워드
   if (!targetNoun) {
     targetNoun = findEarliestKeyword(firstClause, TARGET_KEYWORDS) || findEarliestKeyword(cleanedBody, TARGET_KEYWORDS);
   }
 
-  // 4. 이메일 + 비밀번호 동시 언급
   if (!targetNoun && firstClause.includes('이메일') && firstClause.includes('비밀번호')) {
     targetNoun = '이메일·비밀번호';
   }
 
-  // 5. 첫 문장에서 가장 먼저 등장하는 단일 명사 키워드
   if (!targetNoun) {
     const single = findEarliestKeyword(firstClause, SINGLE_KEYWORDS) || findEarliestKeyword(cleanedBody, SINGLE_KEYWORDS);
     if (single) {
@@ -194,7 +196,6 @@ export function formatRequirementTitle(
     }
   }
 
-  // 6a. 목적격/주격 조사(을/를/이/가) 앞의 핵심 명사구 우선 추출 (non-greedy로 '으' 잘림 방지)
   if (!targetNoun) {
     const directObjMatch = firstClause.match(
       /([가-힣A-Za-z0-9]{2,8}?(?:\s+[가-힣A-Za-z0-9]{2,8}?)?)(?:을|를|이|가)(?=\s)/,
@@ -210,7 +211,6 @@ export function formatRequirementTitle(
     }
   }
 
-  // 6b. 부사격 조사(으로/로) 앞의 명사구 추출 (non-greedy로 '새창으로' -> '새창' 정확히 분리)
   if (!targetNoun) {
     const advMatch = firstClause.match(
       /([가-힣A-Za-z0-9]{2,8}?(?:\s+[가-힣A-Za-z0-9]{2,8}?)?)(?:으로|로)(?=\s)/,
@@ -234,7 +234,6 @@ export function formatRequirementTitle(
     targetNoun = screenPrefix.replace(/\([^)]*\)/g, '').trim() || '기능';
   }
 
-  // 기능 분류 단어: 문장 끝 서술어(동사)를 최우선으로 보고, 없으면 수락 조건 카테고리 → 문장 내 동사 순으로 결정
   const endClause = firstClause.replace(/[.。]+$/, '').trim();
   let actionNoun: string;
   if (/(?:조회|불러온|목록을\s*보여)(?:한다|된다|함|됨)?$/.test(endClause)) actionNoun = '조회';

@@ -1,3 +1,13 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 개별 요구사항의 판정 결과와 정적 참조 흐름 및 코드 근거를 상세히 보여주는 컴포넌트
+ * - 주요 기능:
+ *   1) 요구사항 수락 조건별 판정 결과와 코드 줄 하이라이트 계산
+ *   2) 정적 참조 흐름 노드 표시 및 파일별 코드 스니펫 펼침 제어
+ *   3) VS Code 파일 줄 이동 요청 및 코드 상세 보기 모달 연동
+ */
+
 import React, { useState, useEffect } from "react";
 import { RequirementPanel } from "./RequirementPanel";
 import { Button, CodeBlock, type CodeLineHighlight } from "../common";
@@ -78,6 +88,7 @@ function extractReasonTokens(reason: string, filePath: string): string[] {
   return [...tokens];
 }
 
+// 코드 스니펫에서 판정 상태별로 강조할 줄 번호를 계산하는 로직
 function computeLineHighlights(
   ev: EvidenceItem,
   verdicts: ConditionVerdict[],
@@ -197,6 +208,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
   const [selectedConditionId, setSelectedConditionId] = useState<string | null>(null);
   const [modalEvidence, setModalEvidence] = useState<CodeEvidence | null>(null);
 
+  // 코드 상세 모달을 열거나 VS Code의 해당 줄로 이동하는 로직
   const openDetail = (ev: EvidenceItem, lineHighlights?: Record<number, CodeLineHighlight>) => {
     if (projectId && verificationData?.snapshot_id && isVsCodeEnvironment()) {
       const jumped = requestJumpToLine({
@@ -218,6 +230,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
     });
   };
 
+  // 요구사항 정보와 검증 상세 데이터를 불러오는 로직
   useEffect(() => {
     if (!projectId) return;
 
@@ -295,6 +308,7 @@ export const VerificationDetail: React.FC<VerificationDetailProps> = ({
         </div>
       </div>
 
+      {/* 좌측 요구사항 패널과 우측 코드 근거 영역 */}
       <div className="flex flex-col xl:flex-row gap-6 items-start min-w-0">
         <RequirementPanel
           projectId={projectId || ""}

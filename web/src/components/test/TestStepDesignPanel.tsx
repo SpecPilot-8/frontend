@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 개별 시험 단계의 설계 사유와 입력값 선정 이유 및 명세 판정 기준을 표시하는 컴포넌트
+ * - 주요 기능:
+ *   1) 시험 절차와 입력값 선정에 대한 설계 설명 표시
+ *   2) 단계에 연결된 수락 조건과 기획서 원문 인용구 대조 표시
+ */
+
 import type { DesignIntent, TestStep } from '../../types/test';
 import { evidenceSources, resolveTestEvidence } from '../../services/testEvidence';
 import type { TestRequirement } from '../../services/testEvidence';
@@ -15,15 +24,15 @@ export function TestStepDesignPanel({step, requirements, intents, stale}: Props)
       <p className={`text-xs ${stale || design.basis === 'review_needed' ? 'text-amber-800' : 'text-slate-500'}`}>
         {stale ? '편집 전 생성 설명입니다. 현재 절차·입력값과 다시 대조해야 합니다.' : design.basis === 'review_needed' ? '해석 확인 필요 · 원문 밖의 가정이 포함될 수 있습니다.' : 'AI가 작성한 설계 설명 · 아래 원문과 대조하세요.'}
       </p>
-      <dl className="space-y-3 select-text"><div><dt className="text-xs font-medium text-slate-500">이 절차를 선택한 이유</dt><dd className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{design.rationale}</dd></div><div><dt className="text-xs font-medium text-slate-500">입력값·역할 선정 이유</dt><dd className="mt-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{design.input_rationale}</dd></div></dl>
+      <dl className="space-y-3 select-text"><div><dt className="text-xs font-medium text-slate-500">이 절차를 선택한 이유</dt><dd className="mt-1 whitespace-pre-wrap wrap-anywhere">{design.rationale}</dd></div><div><dt className="text-xs font-medium text-slate-500">입력값·역할 선정 이유</dt><dd className="mt-1 whitespace-pre-wrap wrap-anywhere">{design.input_rationale}</dd></div></dl>
     </> : <p className="text-xs text-slate-500">절차·입력값 선정 사유가 저장되지 않은 단계입니다. 아래는 연결 정보로 확인한 명세이며, 선정 사유를 추정해 채우지 않았습니다.</p>}
     <div className="border-t border-slate-100 pt-3 space-y-3 select-text">
       <p className="text-xs font-semibold text-slate-500">명세의 판정 기준</p>
       {criteria.slice(0, 2).map(({condition, requirement}) => {
         const source = evidenceSources(condition, requirement);
         const quote = source.refs[0];
-        return <div key={`${requirement.id}:${condition.id}`}><p className="whitespace-pre-wrap [overflow-wrap:anywhere]">{condition.text}</p>
-          {quote?.quote ? <><blockquote className="mt-2 border-l-2 border-slate-300 bg-slate-50 px-3 py-2 text-xs leading-6 whitespace-pre-wrap [overflow-wrap:anywhere] line-clamp-3">{quote.quote}</blockquote><p className="mt-1 text-xs text-slate-500">{source.kind === 'condition' ? '조건의 원문 인용' : '요구사항 수준의 인용 · 조건별 인용 없음'}{quote.location?.index ? ` · PDF ${quote.location.index}쪽` : ' · 쪽수 미등록'} · 요구사항 개정 {requirement.revision}</p></> : <p className="mt-1 text-xs text-amber-800">이 조건의 원문 인용이 등록되지 않았습니다.</p>}
+        return <div key={`${requirement.id}:${condition.id}`}><p className="whitespace-pre-wrap wrap-anywhere">{condition.text}</p>
+          {quote?.quote ? <><blockquote className="mt-2 border-l-2 border-slate-300 bg-slate-50 px-3 py-2 text-xs leading-6 whitespace-pre-wrap wrap-anywhere line-clamp-3">{quote.quote}</blockquote><p className="mt-1 text-xs text-slate-500">{source.kind === 'condition' ? '조건의 원문 인용' : '요구사항 수준의 인용 · 조건별 인용 없음'}{quote.location?.index ? ` · PDF ${quote.location.index}쪽` : ' · 쪽수 미등록'} · 요구사항 개정 {requirement.revision}</p></> : <p className="mt-1 text-xs text-amber-800">이 조건의 원문 인용이 등록되지 않았습니다.</p>}
         </div>;
       })}
       {!criteria.length && <p className="text-xs text-amber-800">연결된 조건 또는 해당 개정을 불러오지 못했습니다. 상단의 단계 근거에서 확인하세요.</p>}

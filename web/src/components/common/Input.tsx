@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 텍스트 입력과 오류 상태 테두리 표시를 지원하는 공통 입력창 컴포넌트
+ * - 주요 기능:
+ *   1) 기본 텍스트 입력 필드 렌더링
+ *   2) 오류 여부 및 비활성화 상태에 따른 스타일 전환
+ */
+
 import React from 'react';
 
 interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {

@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 화면 전반에서 사용하는 공통 버튼 컴포넌트
+ * - 주요 기능:
+ *   1) 버튼 종류 및 크기별 스타일 매핑
+ *   2) 비활성화 상태 및 클릭 이벤트 처리
+ */
+
 import React from 'react';
 
 type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'outline';

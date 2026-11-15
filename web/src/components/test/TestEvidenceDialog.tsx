@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 테스트 케이스와 단계에 연결된 요구사항 원문 및 인용 출처를 확인하는 다이얼로그 컴포넌트
+ * - 주요 기능:
+ *   1) 시험에 고정된 요구사항 개정과 수락 조건별 명세 원문 표시
+ *   2) 연결된 기획서 문서 파일 이름 조회 및 원본 페이지 바로가기 제공
+ */
+
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '../common';
 import { api, BASE_URL } from '../../services/api';
@@ -26,6 +35,7 @@ export function TestEvidenceDialog({ projectId, title, links, requirements, onCl
     return () => { dialog?.close(); opener?.focus(); };
   }, []);
 
+  // 연결된 기획서 문서 정보를 조회하는 로직
   useEffect(() => {
     let active = true;
     const ids = [...new Set(resolveTestEvidence(links, requirements).map(item => item.requirement?.document_id).filter((id): id is string => !!id))];
@@ -38,7 +48,7 @@ export function TestEvidenceDialog({ projectId, title, links, requirements, onCl
     return () => { active = false; };
   }, [projectId, links, requirements]);
 
-  return <dialog ref={dialogRef} onClose={() => { if (!dialogRef.current?.open) onClose(); }} aria-labelledby="test-evidence-title" className="m-auto w-[calc(100%_-_2rem)] max-w-2xl max-h-[90vh] rounded-xl border border-slate-200 bg-white p-0 text-slate-800 shadow-lg backdrop:bg-slate-900/40">
+  return <dialog ref={dialogRef} onClose={() => { if (!dialogRef.current?.open) onClose(); }} aria-labelledby="test-evidence-title" className="m-auto w-[calc(100%-2rem)] max-w-2xl max-h-[90vh] rounded-xl border border-slate-200 bg-white p-0 text-slate-800 shadow-lg backdrop:bg-slate-900/40">
     <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-slate-200 bg-white px-6 py-4">
       <div className="min-w-0"><h2 id="test-evidence-title" className="text-base font-semibold">{title}</h2><p className="mt-1 text-xs text-slate-500">연결된 명세 · 원문 확인</p></div>
       <Button variant="secondary" autoFocus onClick={() => dialogRef.current?.close()}>닫기</Button>
@@ -50,7 +60,7 @@ export function TestEvidenceDialog({ projectId, title, links, requirements, onCl
       {resolved.map(({ link, requirement, conditions }) => <section key={`${link.requirement_id}:${link.requirement_revision}`} className="rounded-lg border border-slate-200 p-4 space-y-4">
         {!requirement ? <p className="text-amber-800">연결된 요구사항 개정 {link.requirement_revision}을 불러오지 못했습니다. 다른 개정으로 대체하지 않았습니다.</p> : <>
           <div><p className="text-xs font-medium text-slate-500">요구사항 · 개정 {requirement.revision}{requirement.stable_key && !/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(requirement.stable_key) ? ` · ${requirement.stable_key}` : ''}</p><h3 className="mt-1 font-semibold text-slate-900">{requirement.title}</h3>
-            {requirement.document_id && <p className="mt-1 text-xs text-slate-500 break-words">{documents[requirement.document_id]?.filename || '명세 문서'}{requirement.document_revision ? ` · 문서 개정 ${requirement.document_revision}` : ''}</p>}
+            {requirement.document_id && <p className="mt-1 text-xs text-slate-500 wrap-break-word">{documents[requirement.document_id]?.filename || '명세 문서'}{requirement.document_revision ? ` · 문서 개정 ${requirement.document_revision}` : ''}</p>}
           </div>
           {!!requirement.review_reasons?.length && <details className="text-xs text-slate-600"><summary className="cursor-pointer font-medium">명세 검토 메모</summary>{requirement.review_reasons.map((note, i) => <p className="mt-2 whitespace-pre-wrap" key={i}>{note}</p>)}</details>}
           {!conditions.length && <div className="border-t border-slate-100 pt-4"><p className="text-amber-800">요구사항에는 연결되어 있지만, 구체적인 수락 조건이 지정되지 않았습니다.</p><p className="mt-2 text-slate-600 whitespace-pre-wrap">{requirement.original_text || '저장된 명세 원문이 없습니다.'}</p></div>}

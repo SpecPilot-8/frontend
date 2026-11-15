@@ -1,4 +1,12 @@
-// 명세 파일 정보
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 프로젝트 기본 설정과 업로드 파일 및 모델 프로필 정보를 담는 타입 정의 파일
+ * - 주요 기능:
+ *   1) 기획서 문서와 소스 코드 파일 메타데이터 인터페이스 정의
+ *   2) 모델 프로필 및 프로젝트 전체 설정 인터페이스 정의
+ */
+
 export interface SpecFileInfo {
   fileName: string;
   pageCount?: number;
@@ -7,7 +15,6 @@ export interface SpecFileInfo {
   [key: string]: unknown;
 }
 
-// 소스코드 소스 정보
 export interface CodeSourceInfo {
   type: string;
   sourceName: string;
@@ -16,7 +23,6 @@ export interface CodeSourceInfo {
   [key: string]: unknown;
 }
 
-// 백엔드에서 내려오는 모델 프로필 타입
 export interface AIModelProfile {
   id: string;
   provider: string;
@@ -27,7 +33,6 @@ export interface AIModelProfile {
   credential_required: boolean;
 }
 
-// 프로젝트 설정 전체 데이터
 export interface ProjectSetupData {
   projectName: string;
   version?: number;

@@ -1,9 +1,20 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: VS Code 확장 프로그램을 활성화하고 대시보드 웹뷰 패널 및 코드 점프 명령어를 등록하는 진입 파일
+ * - 주요 기능:
+ *   1) 대시보드 웹뷰 패널 생성 및 메시지 수신 처리
+ *   2) 웹뷰에서 전달된 파일 경로와 줄 번호로 에디터 이동 실행
+ *   3) 코드 스냅샷 복원 및 테스트용 점프 명령어 등록
+ */
+
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
 import { jumpToCodeLocation } from "./jump";
 import { restoreSnapshotCommand } from "./restoreCommand";
 
+// 확장 프로그램 활성화 시 명령어와 웹뷰를 등록하는 로직
 export function activate(context: vscode.ExtensionContext) {
   const openDashboardCmd = vscode.commands.registerCommand(
     "specpilot.openDashboard",
@@ -41,13 +52,11 @@ export function activate(context: vscode.ExtensionContext) {
               <iframe id="specpilot-frame" src="http://localhost:5173/?host=vscode"></iframe>
               <script>
                   const vscode = acquireVsCodeApi();
-                  // 웹뷰 iframe에서 오는 메시지를 VS Code extension으로 중계
                   window.addEventListener("message", (event) => {
                       if (event.data && typeof event.data === "object") {
                           vscode.postMessage(event.data);
                       }
                   });
-                  // 반대로 extension에서 오는 메시지를 iframe으로 전달 (양방향 대비)
                   window.addEventListener("message-from-extension", (event) => {
                       const frame = document.getElementById("specpilot-frame");
                       if (frame && frame.contentWindow) {
@@ -80,7 +89,7 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
-  // 수동 테스트용 점프 커맨드 (Ctrl+Shift+P 로 임의 위치 점프 테스트 가능)
+  // 수동 테스트용 코드 위치 이동 명령어 등록 로직
   const jumpTestCmd = vscode.commands.registerCommand(
     "specpilot.testJumpToLocation",
     async () => {
@@ -132,6 +141,7 @@ export function activate(context: vscode.ExtensionContext) {
   );
 }
 
+// 빌드된 웹 UI 정적 파일을 웹뷰 HTML로 변환하는 로직
 function getWebviewContent(
   context: vscode.ExtensionContext,
   webview: vscode.Webview,

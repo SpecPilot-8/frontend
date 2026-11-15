@@ -1,3 +1,13 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 검증 결과를 바탕으로 테스트 사양서를 자동 생성하고 시험 절차와 수행 결과를 관리하는 화면
+ * - 주요 기능:
+ *   1) 테스트 사양서 자동 생성 및 수동 시험 케이스 추가
+ *   2) 요구사항 근거 확인과 단계별 시험 절차 편집
+ *   3) 시험 수행 결과 기록 및 사양서 파일 내보내기
+ */
+
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import type { StepId } from "../types";
 import type {
@@ -228,6 +238,7 @@ export const TestSpecView: React.FC<{
     setJumpTarget({ caseId, stepKey });
   };
 
+  // 사양서 목록과 검증 실행 이력을 불러오는 로직
   const loadLists = useCallback(async () => {
     if (!projectId) return;
     const [specItems, runItems, jobs] = await Promise.all([
@@ -248,6 +259,7 @@ export const TestSpecView: React.FC<{
     );
     if (pendingJob) setGenerationJobId(pendingJob.id);
   }, [projectId]);
+  // 선택한 테스트 사양서 상세 정보와 시험 케이스를 불러오는 로직
   const loadSpecById = useCallback(
     async (targetId: string) => {
       if (!projectId || !targetId) return;
@@ -360,6 +372,7 @@ export const TestSpecView: React.FC<{
     }
   };
 
+  // 테스트 사양서 생성 작업 진행 상태를 확인하는 로직
   useEffect(() => {
     if (!generationJobId || !projectId) return;
     const controller = new AbortController();
@@ -866,9 +879,8 @@ export const TestSpecView: React.FC<{
           {message}
         </p>
       )}
-      {/* 상단 툴바 카드 */}
+      {/* 상단 사양서 생성 및 선택 영역 */}
       <div className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-2xs space-y-3.5">
-        {/* 1행: 기준 검증 실행 선택 & AI 생성 */}
         <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-100">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
             <label className="text-xs font-semibold text-slate-700 whitespace-nowrap">
@@ -924,7 +936,6 @@ export const TestSpecView: React.FC<{
           </div>
         </div>
 
-        {/* 2행: 사양서 문서 버전 선택 & 내보내기/편집 */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
             <label className="text-xs font-semibold text-slate-700 whitespace-nowrap">
@@ -1214,6 +1225,7 @@ export const TestSpecView: React.FC<{
           </p>
         </div>
       </details>
+      {/* 좌측 시험 목록과 우측 시험 상세 영역 */}
       <div className="grid 2xl:grid-cols-[230px_minmax(0,1fr)] gap-5 items-start">
         <Card
           title="시험 목록"

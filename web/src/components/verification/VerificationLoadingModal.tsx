@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 코드 정합성 검증이 진행되는 동안 현재 분석 단계와 진행률을 표시하는 모달 컴포넌트
+ * - 주요 기능:
+ *   1) 화면 도달 범위 분석과 코드 매칭 및 조건별 판정 단계 표시
+ *   2) 요구사항 처리 진행률 게이지 표시 및 검증 작업 중단 요청
+ */
+
 import React from 'react';
 
 interface VerificationLoadingModalProps {
@@ -24,6 +33,7 @@ export const VerificationLoadingModal: React.FC<VerificationLoadingModalProps> =
   if (!isOpen) return null;
 
   const hasProgress = progress && progress.total > 0;
+  // 전체 요구사항 대비 완료 비율을 계산하는 로직
   const percent = hasProgress
     ? Math.min(100, Math.round((progress.completed / progress.total) * 100))
     : 0;
@@ -38,7 +48,6 @@ export const VerificationLoadingModal: React.FC<VerificationLoadingModalProps> =
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200"
     >
       <div className="w-full max-w-lg rounded-2xl bg-white p-6 md:p-8 shadow-2xl border border-slate-100 flex flex-col items-center text-center space-y-6">
-        {/* 애니메이션 검증 아이콘 */}
         <div className="relative flex items-center justify-center w-20 h-20">
           <div className="absolute inset-0 rounded-full bg-indigo-100 animate-ping opacity-30" />
           <div className="absolute inset-1 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin" />
@@ -59,7 +68,6 @@ export const VerificationLoadingModal: React.FC<VerificationLoadingModalProps> =
           </div>
         </div>
 
-        {/* 텍스트 영역 */}
         <div className="space-y-1.5">
           <h3 className="text-lg font-bold text-slate-800">
             코드 정합성 AI 검증 분석 중
@@ -69,7 +77,7 @@ export const VerificationLoadingModal: React.FC<VerificationLoadingModalProps> =
           </p>
         </div>
 
-        {/* 3단계 파이프라인 인디케이터 */}
+        {/* 검증 단계 및 진행률 표시 영역 */}
         <div className="w-full grid grid-cols-3 gap-2 text-center text-xs">
           {STAGES.map((st, idx) => {
             const isCurrent = currentStage === st.key;
@@ -97,7 +105,6 @@ export const VerificationLoadingModal: React.FC<VerificationLoadingModalProps> =
           })}
         </div>
 
-        {/* 진행률 게이지 카드 */}
         <div className="w-full bg-slate-50 rounded-xl p-4 border border-slate-100 space-y-2.5">
           <div className="flex justify-between items-center text-xs font-medium text-slate-600">
             <span className="flex items-center gap-1.5">
@@ -113,7 +120,6 @@ export const VerificationLoadingModal: React.FC<VerificationLoadingModalProps> =
             )}
           </div>
 
-          {/* 게이지 바 */}
           <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
             {hasProgress ? (
               <div
@@ -126,7 +132,6 @@ export const VerificationLoadingModal: React.FC<VerificationLoadingModalProps> =
           </div>
         </div>
 
-        {/* 하단 안내 및 중단 버튼 */}
         <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2.5 w-full text-left">
           <span className="font-semibold text-slate-700 mr-1.5">[안내]</span>
           대규모 소스코드 및 AST 정합성 판정에는 10~30초 가량 소요될 수 있습니다. 분석이 완료되면 자동으로 화면이 전환됩니다.

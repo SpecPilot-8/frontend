@@ -1,3 +1,13 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 프로젝트 정보와 단계별 화면 이동 메뉴를 제공하는 좌측 사이드바 컴포넌트
+ * - 주요 기능:
+ *   1) 현재 워크스페이스 이름과 기술 스택 표시 및 사이드바 접기 토글
+ *   2) 4단계 화면 이동 네비게이션 버튼 제공
+ *   3) 홈 화면으로 돌아가는 프로젝트 전환 기능
+ */
+
 import React, { useState } from "react";
 import type { StepId } from "../../types";
 
@@ -138,7 +148,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </nav>
       </div>
 
-      {/* 하단 프로세스 안내 및 프로젝트 전환 버튼 */}
+      {/* 하단 프로젝트 전환 영역 */}
       <div
         className={`pt-4 border-t border-slate-100 ${
           isCollapsed ? "flex justify-center" : "space-y-2.5"

@@ -1,4 +1,13 @@
 /* eslint-disable react-refresh/only-export-components */
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 현재 선택된 프로젝트 정보와 화면 이동 잠금 상태를 전역으로 관리하는 컨텍스트 파일
+ * - 주요 기능:
+ *   1) 프로젝트 식별자와 프로젝트 이름의 로컬 스토리지 동기화
+ *   2) 미저장 변경 사항 여부 및 화면 전환 전 저장 콜백 관리
+ */
+
 import { createContext, useContext, useState, useRef } from "react";
 import type { ReactNode, MutableRefObject } from "react";
 
@@ -31,6 +40,7 @@ export const ProjectProvider = ({ children }: { children: ReactNode }) => {
   const [analysisTarget, setAnalysisTarget] = useState<ProjectContextType['analysisTarget']>(null);
   const [unsavedChanges,setUnsavedChanges] = useState(false);
   const [navigationLocked,setNavigationLocked] = useState(false);
+  // 프로젝트 선택 상태를 로컬 스토리지에 반영하는 로직
   const selectProject = (id: string | null) => {
     if (id) localStorage.setItem("specpilot.projectId", id);
     else {

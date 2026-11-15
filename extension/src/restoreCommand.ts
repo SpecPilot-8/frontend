@@ -1,9 +1,19 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: VS Code 명령 팔레트에서 프로젝트와 스냅샷을 선택하여 로컬 폴더에 복원하는 명령어 처리 파일
+ * - 주요 기능:
+ *   1) 확장 프로그램 설정에서 API 주소 및 워크스페이스 루트 경로 조회
+ *   2) 프로젝트 및 스냅샷 목록 선택창 표시와 로컬 복원 실행
+ */
+
 import * as vscode from "vscode";
 import { fetchProjects, fetchSnapshotFiles, fetchSnapshots } from "./backend";
 import { applyRestore, planRestore } from "./restore";
 
 export const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000/api/v2";
 
+// 확장 프로그램 설정을 읽어오는 로직
 export function readSettings(): { apiBaseUrl: string; workspaceRoot: string } {
   const config = vscode.workspace.getConfiguration("specpilot");
   return {
@@ -12,7 +22,7 @@ export function readSettings(): { apiBaseUrl: string; workspaceRoot: string } {
   };
 }
 
-/** 프로젝트·스냅샷을 골라 `<workspaceRoot>\<프로젝트명>`에 소스를 복원한다. */
+// 프로젝트와 스냅샷을 선택하여 로컬에 소스를 복원하는 로직
 export async function restoreSnapshotCommand(): Promise<void> {
   const { apiBaseUrl, workspaceRoot } = readSettings();
   try {

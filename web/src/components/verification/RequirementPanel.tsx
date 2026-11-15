@@ -1,3 +1,13 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 검증 상세 화면 좌측에서 요구사항 원문과 수락 조건별 판정 현황을 표시하는 컴포넌트
+ * - 주요 기능:
+ *   1) 요구사항 원문 인용구와 기획서 원본 페이지 미리보기 제공
+ *   2) 범주별 수락 조건 구현 현황 집계 및 표시
+ *   3) 조건별 판정 상세 확인 및 연결된 코드 근거 선택 처리
+ */
+
 import React, { useState } from 'react';
 import { Card, Button } from '../common';
 import { SpecPageViewer } from './SpecPageViewer';
@@ -78,6 +88,7 @@ export const RequirementPanel: React.FC<RequirementPanelProps> = ({
   const verdicts = verificationData?.condition_verdicts || [];
   const displayTitle = formatRequirementTitle(requirement.title, requirement.original_text, conditions);
 
+  // 범주별 수락 조건의 전체 개수와 구현 완료 개수를 집계하는 로직
   const statsList = categories.map(cat => {
     const catConditions = conditions.filter((c: Condition) => c.category === cat.key);
     if (catConditions.length === 0) return null;
@@ -165,6 +176,7 @@ export const RequirementPanel: React.FC<RequirementPanelProps> = ({
           </section>
         )}
 
+        {/* 수락 조건 검증 집계 및 상세 목록 영역 */}
         <div className="border-t border-slate-100 pt-6">
           <h4 className="text-sm font-bold text-slate-900 mb-3">수락 조건 검증</h4>
           <ul className="space-y-2 text-sm">

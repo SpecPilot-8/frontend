@@ -1,36 +1,37 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 기획서 문서의 특정 페이지를 캔버스에 렌더링하고 출처 위치를 강조 표시하는 컴포넌트
+ * - 주요 기능:
+ *   1) 문서 페이지 확대 및 전체 보기 전환 렌더링
+ *   2) 출처 좌표 또는 검색 문장 기반 하이라이트 영역 표시
+ *   3) 활성 출처 위치로 프레임 내부 스크롤 자동 이동
+ */
+
 import React, { useEffect, useRef, useState } from "react";
 import type * as pdfjs from "pdfjs-dist";
 import { loadDocument } from "../common/pdf";
 
 export interface PageHighlight {
-  // [x, y, w, h], PDF 좌표(pt, 왼쪽 위 기준)
   bbox: number[];
-  // 현재 보고 있는 출처. 진하게 표시하고 이 박스로 스크롤한다
   active?: boolean;
 }
 
 interface SpecPageViewerProps {
-  // 백엔드 GET /documents/{d}/file
   fileUrl: string;
-  // 1부터 센다 (v2 블록 location.index)
   page: number;
-  // [x, y, w, h], PDF 좌표(pt, 왼쪽 위 기준). 파서가 찾은 요구사항 행 위치
   bbox?: number[];
-  // 여러 출처를 한 페이지에 함께 표시할 때 사용한다. 있으면 bbox보다 우선한다
   highlights?: PageHighlight[];
-  // 활성 박스 좌표가 없을 때 페이지 텍스트에서 이 문장을 찾아 위치를 추정한다
   searchText?: string;
 }
 
 type LocateStatus = "bbox" | "text" | "none";
 
-// 화면설계서 한 페이지를 패널 폭에 다 맞추면 글자를 읽을 수 없어서 기본은 확대해서 요구사항 위치로 스크롤한다
 const ZOOM = 3;
 
 const normalize = (s: string) => s.replace(/\s+/g, "");
 
-// 텍스트 레이어에서 문장을 찾아 그 글자들을 감싸는 박스를 [x, y, w, h](scale 1, 왼쪽 위 기준)로 돌려준다.
-// OCR 페이지처럼 텍스트 레이어가 없으면 null.
+// 페이지 텍스트에서 검색 문장과 일치하는 영역 좌표를 계산하는 로직
 const findTextBox = (
   items: unknown[],
   viewport: pdfjs.PageViewport,
@@ -52,7 +53,6 @@ const findTextBox = (
   const needle = normalize(text);
   if (!needle || !haystack) return null;
 
-  // 표 셀 줄바꿈 때문에 긴 문장은 통째로 안 맞을 수 있어 앞부분을 점점 줄여가며 찾는다
   let start = -1;
   let length = 0;
   for (const n of [needle.length, 60, 30, 15]) {
@@ -90,9 +90,9 @@ export const SpecPageViewer: React.FC<SpecPageViewerProps> = ({ fileUrl, page, b
   const [status, setStatus] = useState<LocateStatus>("none");
 
   const boxes: PageHighlight[] = highlights ?? (bbox ? [{ bbox, active: true }] : []);
-  // 부모가 렌더할 때마다 새 배열을 넘겨도 페이지를 다시 그리지 않도록 값으로 비교한다
   const boxKey = JSON.stringify(boxes);
 
+  // 문서 페이지를 캔버스에 그리고 강조 위치로 스크롤하는 로직
   useEffect(() => {
     let cancelled = false;
     let renderTask: pdfjs.RenderTask | null = null;
@@ -131,7 +131,6 @@ export const SpecPageViewer: React.FC<SpecPageViewerProps> = ({ fileUrl, page, b
         setScale(s);
         setError(null);
         if (target && !fit) {
-          // 박스가 프레임 가운데 오도록 프레임 안에서만 스크롤한다 (페이지 전체는 움직이지 않는다)
           frame.scrollTo({
             left: Math.max(0, (target[0] + target[2] / 2) * s - frame.clientWidth / 2),
             top: Math.max(0, (target[1] + target[3] / 2) * s - frame.clientHeight / 2),

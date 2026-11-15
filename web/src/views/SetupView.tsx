@@ -1,3 +1,13 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 프로젝트 기본 정보와 기획서 문서 및 소스 코드를 등록하고 모델 연결을 설정하는 화면
+ * - 주요 기능:
+ *   1) 프로젝트 이름 및 분석 기술 스택 설정
+ *   2) 기획서 문서와 소스 코드 압축 파일 업로드 및 인덱싱 요청
+ *   3) 백엔드 서버 모델 설정 조회 및 실제 연결 확인
+ */
+
 import { PROJECT_STACKS } from "../projectStacks";
 import React, { useState, useEffect, useCallback } from "react";
 import type { StepId, ProjectSetupData } from "../types";
@@ -91,6 +101,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
       .catch(() => setConnectionErrorMsg("서버 모델 설정을 불러오지 못했습니다. 백엔드 연결을 확인하세요."));
   }, []);
 
+  // 기획서 파일 업로드 훅 설정
   const {
     inputRef: specInputRef,
     handleFileChange: onSpecFileChange,
@@ -113,6 +124,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     },
   });
 
+  // 소스 코드 압축 파일 업로드 훅 설정
   const {
     inputRef: codeInputRef,
     handleFileChange: onCodeFileChange,
@@ -131,6 +143,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     },
   });
 
+  // 프로젝트 기존 설정과 업로드 상태를 불러오는 로직
   useEffect(() => {
     if (!projectId || isSaving || unsavedChanges) return;
     let active = true;
@@ -222,6 +235,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     }
   };
 
+  // 프로젝트 설정 저장 및 파일 업로드와 인덱싱을 처리하는 로직
   const handleSaveAndUpload = useCallback(async (): Promise<boolean> => {
     if (isSaving) return false;
     if (!setupData || !setupData.projectName.trim()) {
@@ -327,6 +341,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
     };
   }, [saveBeforeLeaveRef, unsavedChanges, handleSaveAndUpload]);
 
+  // 서버에 설정된 모델의 실제 호출 가능 여부를 확인하는 로직
   const handleVerifyApiKey = async () => {
     if (!projectId) {
       alert("먼저 프로젝트 설정을 저장해주세요.");
@@ -397,6 +412,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
 
       {loadError && <p role="alert" className="text-sm text-red-700">{loadError} 현재 입력은 유지됩니다.</p>}
       <fieldset disabled={isSaving || connectionStatus === "CHECKING"} className="min-w-0 grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
+        {/* 좌측 프로젝트 자료 등록 영역 */}
         <div className="lg:col-span-8">
           <Card
             title="프로젝트와 분석 자료"
@@ -584,6 +600,7 @@ export const SetupView: React.FC<SetupViewProps> = ({
           </Card>
         </div>
 
+        {/* 우측 모델 연결 및 안내 영역 */}
         <div className="lg:col-span-4 flex flex-col justify-between gap-5 h-full">
           <Card
             title="AI 모델 연결"

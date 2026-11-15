@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 개별 수락 조건에 대해 시험 절차와 기대 결과의 설계 적합성을 기록하는 다이얼로그 컴포넌트
+ * - 주요 기능:
+ *   1) 수락 조건과 연결된 시험 단계의 절차 및 기대 결과 표시
+ *   2) 설계 적합성 판단 결과와 검토 사유 입력 및 저장 처리
+ */
+
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '../common';
 import { api, errorMessage, jsonRequest } from '../../services/api';
@@ -32,6 +41,7 @@ export function ConditionReviewDialog({projectId, test, review, conditionText, t
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty, busy]);
   const close = () => {if (!busy && (!dirty || window.confirm('작성한 설계 검토를 저장하지 않고 닫을까요?'))) onClose();};
+  // 작성한 설계 적합성 검토 결과를 서버에 저장하는 로직
   const save = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!decision || !reason.trim() || busy) return;
@@ -46,10 +56,10 @@ export function ConditionReviewDialog({projectId, test, review, conditionText, t
     } catch (e) {setError(`${errorMessage(e)} 입력한 사유는 유지됩니다.`);}
     finally {setBusy(false);}
   };
-  return <dialog ref={dialogRef} aria-labelledby="condition-review-title" onCancel={e=>{e.preventDefault();close();}} className="m-auto w-[calc(100%_-_2rem)] max-w-2xl max-h-[90vh] border border-slate-200 rounded-xl bg-white p-0 text-slate-800 shadow-lg backdrop:bg-slate-900/40">
+  return <dialog ref={dialogRef} aria-labelledby="condition-review-title" onCancel={e=>{e.preventDefault();close();}} className="m-auto w-[calc(100%-2rem)] max-w-2xl max-h-[90vh] border border-slate-200 rounded-xl bg-white p-0 text-slate-800 shadow-lg backdrop:bg-slate-900/40">
     <form onSubmit={save}>
       <header className="sticky top-0 border-b border-slate-200 bg-white px-5 py-4"><h2 id="condition-review-title" className="font-semibold">수락 조건의 시험 설계 검토</h2><p className="mt-1 text-xs text-slate-500">{test.test_no} · 절차 개정 {test.revision} · 요구사항 개정 {target.requirement_revision}</p></header>
-      <div className="p-5 space-y-4 text-sm leading-7 [overflow-wrap:anywhere]">
+      <div className="p-5 space-y-4 text-sm leading-7 wrap-anywhere">
         <section className="rounded-lg border border-slate-200 bg-slate-50 p-3"><h3 className="text-xs font-semibold text-slate-500">확인할 수락 조건</h3><p className="mt-1 whitespace-pre-wrap select-text">{conditionText}</p></section>
         {steps.map(step=><section key={step.step_key} className="border-b border-slate-100 pb-3"><h3 className="text-xs font-semibold text-slate-500">단계 {step.order}</h3><p className="mt-1 whitespace-pre-wrap">절차: {step.action}</p><p className="mt-1 whitespace-pre-wrap">기대 결과: {step.expected}</p></section>)}
         <p className="text-xs text-slate-500">위 절차와 기대 결과가 이 조건을 충분히 확인하는지 검토하세요. 입력값·준비 상태·허용과 거부·필요한 경계값도 확인합니다. 실제 실행 결과는 별도 수행 기록에 입력합니다.</p>

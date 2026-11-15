@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 기획서 문서에서 요구사항을 자동 추출하는 동안 화면별 진행률을 표시하는 모달 컴포넌트
+ * - 주요 기능:
+ *   1) 전체 화면 대비 추출 완료 비율 계산 및 진행 바 표시
+ *   2) 현재 추출 상태 메시지 및 주의 사항 안내 표시
+ */
+
 import React from 'react';
 
 interface ExtractionLoadingModalProps {
@@ -14,6 +23,7 @@ export const ExtractionLoadingModal: React.FC<ExtractionLoadingModalProps> = ({
   if (!isOpen) return null;
 
   const hasProgress = progress && progress.total > 0;
+  // 전체 화면 수 대비 추출 완료 비율을 계산하는 로직
   const percent = hasProgress
     ? Math.min(100, Math.round((progress.completed / progress.total) * 100))
     : 0;
@@ -26,7 +36,6 @@ export const ExtractionLoadingModal: React.FC<ExtractionLoadingModalProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
     >
       <div className="w-full max-w-lg rounded-2xl bg-white p-6 md:p-8 shadow-2xl border border-slate-100 flex flex-col items-center text-center space-y-6">
-        {/* 애니메이션 AI 아이콘 */}
         <div className="relative flex items-center justify-center w-20 h-20">
           <div className="absolute inset-0 rounded-full bg-blue-100 animate-ping opacity-30" />
           <div className="absolute inset-1 rounded-full border-2 border-blue-400 border-t-transparent animate-spin" />
@@ -47,7 +56,6 @@ export const ExtractionLoadingModal: React.FC<ExtractionLoadingModalProps> = ({
           </div>
         </div>
 
-        {/* 텍스트 영역 */}
         <div className="space-y-1.5">
           <h3 className="text-lg font-bold text-slate-800">
             AI 요구사항 자동 추출 진행 중
@@ -57,7 +65,7 @@ export const ExtractionLoadingModal: React.FC<ExtractionLoadingModalProps> = ({
           </p>
         </div>
 
-        {/* 진행률 게이지 카드 */}
+        {/* 추출 진행률 표시 영역 */}
         <div className="w-full bg-slate-50 border border-slate-200/80 rounded-xl p-4 space-y-2.5 text-left">
           <div className="flex items-center justify-between text-xs font-semibold">
             <span className="text-blue-700 flex items-center gap-1.5">
@@ -83,7 +91,6 @@ export const ExtractionLoadingModal: React.FC<ExtractionLoadingModalProps> = ({
           </div>
         </div>
 
-        {/* 하단 안내 */}
         <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2.5 w-full">
           <span className="font-semibold text-slate-700 mr-1.5">[안내]</span>
           분석 중에는 브라우저 창을 닫지 마세요. 완료 후 원문과 비교 검토할 수 있도록 초안으로 안전하게 저장됩니다.

@@ -1,3 +1,13 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 최근 작업한 프로젝트 목록을 조회하고 새 프로젝트를 시작하는 홈 화면
+ * - 주요 기능:
+ *   1) 최근 프로젝트 목록 조회 및 표시
+ *   2) 새 프로젝트 설정 화면 이동
+ *   3) 기존 프로젝트 열기 및 삭제 처리
+ */
+
 import React, { useEffect, useState } from "react";
 import type { RecentProject, StepId } from "../types";
 import { deleteProject, fetchRecentProjects } from "../services/api";
@@ -19,6 +29,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  // 최근 프로젝트 목록을 불러오는 로직
   const loadProjects = () => {
     fetchRecentProjects()
       .then((data) => {
@@ -32,11 +43,13 @@ export const HomeView: React.FC<HomeViewProps> = ({
     loadProjects();
   }, []);
 
+  // 새 프로젝트 생성을 시작하는 로직
   const handleStartNewSetup = () => {
     setProjectId(null);
     onNavigateStep("SETUP");
   };
 
+  // 선택한 프로젝트를 삭제하는 로직
   const handleDeleteProject = async (id: string) => {
     const confirmed = window.confirm(
       "정말로 이 프로젝트를 삭제하시겠습니까?\n삭제한 프로젝트는 복구할 수 없습니다.",
@@ -53,6 +66,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
     }
   };
 
+  // 선택한 프로젝트를 여는 로직
   const handleOpenProject = (id: string) => {
     setProjectId(id);
     onSelectProject(id);
@@ -60,6 +74,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
 
   return (
     <div className="max-w-4xl mx-auto py-8 px-6 space-y-6">
+      {/* 상단 시작 배너 영역 */}
       <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <span className="text-xs font-semibold text-blue-600 block mb-1">
@@ -87,6 +102,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
           {error}
         </p>
       )}
+      {/* 최근 프로젝트 목록 영역 */}
       <Card
         title="최근 프로젝트"
         description="이전에 분석 및 검증을 진행했던 프로젝트 목록입니다."

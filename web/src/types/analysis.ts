@@ -1,4 +1,12 @@
-// SourceReference
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 기획서 문서 분석을 통해 추출된 요구사항과 수락 조건의 데이터 타입을 정의한 파일
+ * - 주요 기능:
+ *   1) 원문 출처 참조와 세부 수락 조건 인터페이스 정의
+ *   2) 요구사항 항목 및 문서 구조 노드 인터페이스 정의
+ */
+
 export interface SourceReference {
   block_id?: string;
   quote?: string;
@@ -10,7 +18,6 @@ export interface SourceReference {
   [key: string]: unknown;
 }
 
-// Condition
 export interface Condition {
   id?: string;
   stable_key: string;
@@ -30,7 +37,6 @@ export interface Condition {
   constraint?: { field: string; operator: string; value: number; unit: string; unit_definition?: string | null } | null;
 }
 
-// RequirementItem
 export interface RequirementItem {
   id: string;
   stable_key: string;
@@ -46,7 +52,6 @@ export interface RequirementItem {
   conditions: Condition[];
 }
 
-// 문서 구조
 export interface DocumentOutlineNode {
   id: string;
   title: string;

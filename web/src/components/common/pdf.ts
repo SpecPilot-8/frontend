@@ -1,11 +1,18 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: PDF 문서를 로드하고 블록 영역 안에서 인용문 텍스트의 줄별 좌표를 계산하는 유틸 파일
+ * - 주요 기능:
+ *   1) 한글 폰트 구문 해석을 위한 번들 CMap 로더 설정 및 문서 캐싱
+ *   2) PDF 텍스트 항목의 글자 단위 좌표 변환
+ *   3) 블록 범위 내 인용문 문자열 매칭 및 줄별 하이라이트 사각형 산출
+ */
+
 import * as pdfjs from "pdfjs-dist";
 import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
-// 한글 CID 폰트는 CMap 없이는 pdf.js가 글자를 해석하지 못해 텍스트 레이어가 비고,
-// 인용문 위치를 하나도 찾을 수 없다. VS Code webview(base: "./")에서는 cMapUrl 같은
-// 고정 경로가 깨지므로 CMap을 번들 자산으로 넣고 pdf.js에 직접 공급한다.
 const cmapUrls = import.meta.glob("/node_modules/pdfjs-dist/cmaps/*.bcmap", {
   query: "?url",
   import: "default",
@@ -15,6 +22,7 @@ const cmapByName = new Map(
   Object.entries(cmapUrls).map(([path, url]) => [path.slice(path.lastIndexOf("/") + 1, -".bcmap".length), url]),
 );
 
+// 번들된 CMap 데이터를 읽어오는 클래스
 class BundledCMapReaderFactory {
   async fetch({ name }: { name: string }) {
     const url = cmapByName.get(name);
@@ -25,7 +33,7 @@ class BundledCMapReaderFactory {
   }
 }
 
-// 같은 문서를 요구사항마다 다시 받지 않는다
+// PDF 문서를 캐싱하여 로드하는 로직
 const documents = new Map<string, Promise<pdfjs.PDFDocumentProxy>>();
 export const loadDocument = (url: string) => {
   if (!documents.has(url)) {
@@ -40,7 +48,6 @@ export const loadDocument = (url: string) => {
   return documents.get(url)!;
 };
 
-/** [x, y, w, h], PDF pt, 페이지 왼쪽 위 원점 (백엔드 블록 location.bbox와 같은 좌표계) */
 export type PdfRect = [number, number, number, number];
 
 type TextItem = { str: string; transform: number[]; width: number };
@@ -52,7 +59,7 @@ const mul = (m: number[], n: number[]) => [
   m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5],
 ];
 
-/** 텍스트 항목을 글자 단위로 펼친다. pdf.js는 글자별 폭을 주지 않으므로 항목 폭을 글자 수로 나눈다. */
+// 텍스트 항목을 글자 단위 좌표로 변환하는 로직
 function toGlyphs(items: TextItem[], viewportTransform: number[]): Glyph[] {
   const glyphs: Glyph[] = [];
   const lines: { base: number; size: number }[] = [];
@@ -77,13 +84,7 @@ function toGlyphs(items: TextItem[], viewportTransform: number[]): Glyph[] {
   return glyphs;
 }
 
-/**
- * 인용문(quote)이 블록(bbox) 안에서 차지하는 줄별 사각형. 못 찾으면 null.
- *
- * 기획서 PDF는 한글 공백이 빠진 채 글자 간격으로만 띄어 쓰는 경우가 많아, 백엔드가 공백을
- * 복원한 블록 텍스트와 PDF 텍스트의 공백이 다르다. 공백을 모두 지운 문자열끼리 비교한다.
- * OCR로 읽은 헤더처럼 PDF에 글자가 없는 블록은 null → 호출 측에서 블록 전체로 표시한다.
- */
+// 블록 안에서 인용문이 차지하는 줄별 사각형 좌표를 계산하는 로직
 export function quoteRects(items: TextItem[], viewportTransform: number[], bbox: PdfRect, quote: string): PdfRect[] | null {
   const needle = quote.normalize("NFC").replace(/\s+/g, "");
   if (!needle) return null;

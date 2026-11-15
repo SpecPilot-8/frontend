@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 기획서 문서 파싱 과정에서 발생한 경고 항목을 유형별로 묶어 보여주는 배너 컴포넌트
+ * - 주요 기능:
+ *   1) 경고 코드별 메시지 그룹화 및 건수 표시
+ *   2) 경고가 발생한 원본 문서 페이지 바로가기 링크 제공
+ */
+
 import React from 'react';
 
 export interface ParsingWarning { code?: string; message: string }

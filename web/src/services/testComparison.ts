@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 테스트 케이스와 요구사항 수락 조건 간의 연결 관계를 대조하는 파일
+ * - 주요 기능:
+ *   1) 조건별로 연결된 테스트 단계 목록 집계
+ *   2) 현재 선택된 시험과 다른 시험의 조건 참조 분리
+ */
+
 import type { TestCase, TestStep } from '../types/test';
 import type { TestRequirement } from './testEvidence';
 
@@ -8,7 +17,7 @@ export interface ComparedStep {
   action: string; expected: string; rationale?: string;
 }
 
-/** 연결 기록만 계산한다. 문장 유사도나 코드 판정으로 설계 적합/실제 통과를 만들지 않는다. */
+// 요구사항 수락 조건과 테스트 단계의 연결 상태를 계산하는 로직
 export function compareTestRequirements(
   versions: PinnedRequirement[], requirements: TestRequirement[], cases: TestCase[],
   active: TestCase, activeSteps: TestStep[] = active.steps,

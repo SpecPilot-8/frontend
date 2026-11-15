@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 선택한 코드 근거의 현재 스니펫과 수정 제안 코드를 비교해 보여주는 모달 컴포넌트
+ * - 주요 기능:
+ *   1) 현재 코드 스니펫과 수정 제안 코드 탭 전환 표시
+ *   2) 판정 사유 및 불일치 설명 표시와 단축키 닫기 처리
+ */
+
 import React, { useEffect, useState } from 'react';
 import { CodeBlock, type CodeLineHighlight } from '../common/CodeBlock';
 
@@ -35,7 +44,7 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
     setActiveTab('current');
   }
 
-  // ESC 키로 닫기
+  // 단축키 입력 시 모달을 닫는 로직
   useEffect(() => {
     if (!isOpen) return;
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -61,7 +70,7 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
         className="relative w-full max-w-5xl max-h-[90vh] bg-white rounded-xl shadow-2xl flex flex-col overflow-hidden border border-slate-200"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Modal Header */}
+        {/* 모달 상단 헤더 영역 */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
           <div className="min-w-0 pr-4">
             <div className="flex items-center gap-2 mb-1">
@@ -100,7 +109,6 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
           </button>
         </div>
 
-        {/* Tab Header if suggested code exists */}
         {evidence.suggested_code && (
           <div className="flex border-b border-slate-200 bg-slate-100/80 px-6 pt-2">
             <button
@@ -129,9 +137,8 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
           </div>
         )}
 
-        {/* Modal Body */}
+        {/* 코드 뷰어 및 분석 설명 영역 */}
         <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-slate-50/50">
-          {/* Code Viewer */}
           <div>
             {activeTab === 'current' ? (
               <CodeBlock
@@ -159,7 +166,6 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
             )}
           </div>
 
-          {/* AI Explanation Box */}
           {evidence.explanation && (
             <div className={`p-4 rounded-lg border text-sm leading-relaxed ${
               isProblem ? 'bg-amber-50/80 border-amber-200 text-amber-900' : 'bg-blue-50/80 border-blue-200 text-blue-900'
@@ -172,7 +178,6 @@ export const CodeViewerModal: React.FC<CodeViewerModalProps> = ({
           )}
         </div>
 
-        {/* Modal Footer */}
         <div className="flex items-center justify-between px-6 py-3 border-t border-slate-200 bg-white">
           <span className="text-xs text-slate-400">
             단축키: <kbd className="px-1.5 py-0.5 rounded bg-slate-100 border border-slate-300 font-mono text-[11px]">ESC</kbd> 로 닫기

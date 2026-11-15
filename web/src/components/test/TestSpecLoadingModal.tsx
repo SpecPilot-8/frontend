@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 테스트 사양서를 자동 생성하는 동안 소주제별 진행률과 생성 단계를 표시하는 모달 컴포넌트
+ * - 주요 기능:
+ *   1) 요구사항 대조와 절차 도출 및 초안 빌드 단계 표시
+ *   2) 소주제별 생성 진행률 게이지 표시 및 생성 중단 요청 처리
+ */
+
 import React from 'react';
 
 interface TestSpecLoadingModalProps {
@@ -24,11 +33,11 @@ export const TestSpecLoadingModal: React.FC<TestSpecLoadingModalProps> = ({
   if (!isOpen) return null;
 
   const hasProgress = progress && progress.total > 0;
+  // 전체 소주제 대비 생성 완료 비율을 계산하는 로직
   const percent = hasProgress
     ? Math.min(100, Math.round((progress.completed / progress.total) * 100))
     : 0;
 
-  // 진행률에 따라 3단계 인디케이터 활성화
   const currentStepIdx = !hasProgress
     ? 0
     : percent < 40
@@ -45,7 +54,6 @@ export const TestSpecLoadingModal: React.FC<TestSpecLoadingModalProps> = ({
       className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4 animate-in fade-in duration-200"
     >
       <div className="w-full max-w-lg rounded-2xl bg-white p-6 md:p-8 shadow-2xl border border-slate-100 flex flex-col items-center text-center space-y-6">
-        {/* 애니메이션 테스트 문서 아이콘 */}
         <div className="relative flex items-center justify-center w-20 h-20">
           <div className="absolute inset-0 rounded-full bg-emerald-100 animate-ping opacity-30" />
           <div className="absolute inset-1 rounded-full border-2 border-emerald-500 border-t-transparent animate-spin" />
@@ -66,7 +74,6 @@ export const TestSpecLoadingModal: React.FC<TestSpecLoadingModalProps> = ({
           </div>
         </div>
 
-        {/* 텍스트 영역 */}
         <div className="space-y-1.5">
           <h3 className="text-lg font-bold text-slate-800">
             QA 테스트 사양서 AI 자동 생성 중
@@ -76,7 +83,7 @@ export const TestSpecLoadingModal: React.FC<TestSpecLoadingModalProps> = ({
           </p>
         </div>
 
-        {/* 3단계 파이프라인 인디케이터 */}
+        {/* 사양서 생성 단계 및 진행률 표시 영역 */}
         <div className="w-full grid grid-cols-3 gap-2 text-center text-xs">
           {STAGES.map((st, idx) => {
             const isCurrent = currentStepIdx === idx;
@@ -102,7 +109,6 @@ export const TestSpecLoadingModal: React.FC<TestSpecLoadingModalProps> = ({
           })}
         </div>
 
-        {/* 진행률 게이지 카드 */}
         <div className="w-full bg-slate-50 rounded-xl p-4 border border-slate-100 space-y-2.5">
           <div className="flex justify-between items-center text-xs font-medium text-slate-600">
             <span className="flex items-center gap-1.5">
@@ -118,7 +124,6 @@ export const TestSpecLoadingModal: React.FC<TestSpecLoadingModalProps> = ({
             )}
           </div>
 
-          {/* 게이지 바 */}
           <div className="w-full bg-slate-200 h-2.5 rounded-full overflow-hidden">
             {hasProgress ? (
               <div
@@ -131,7 +136,6 @@ export const TestSpecLoadingModal: React.FC<TestSpecLoadingModalProps> = ({
           </div>
         </div>
 
-        {/* 하단 안내 및 중단 버튼 */}
         <div className="text-[11px] text-slate-500 bg-slate-50 border border-slate-200 rounded-lg p-2.5 w-full text-left">
           <span className="font-semibold text-slate-700 mr-1.5">[안내]</span>
           생성된 테스트 절차와 예상 결과는 화면에서 자유롭게 수정·보완하고 Excel로 내보낼 수 있습니다. 실제 수행(O/X) 필드는 빈 상태로 유지됩니다.

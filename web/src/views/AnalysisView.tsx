@@ -1,3 +1,13 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 업로드된 기획서 문서를 파싱하여 요구사항과 수락 조건을 추출하고 검토 및 편집하는 화면
+ * - 주요 기능:
+ *   1) 기획서 문서 파싱 및 요구사항 자동 추출 실행
+ *   2) 원본 문서 페이지 미리보기와 출처 영역 하이라이트 표시
+ *   3) 요구사항 및 세부 수락 조건 편집과 검토 확정 처리
+ */
+
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import type { StepId, Condition, RequirementItem } from "../types";
 import { useProject } from "../contexts/ProjectContext";
@@ -78,7 +88,6 @@ type Ref = {
   quote?: string;
   location?: { index?: number; bbox?: number[] };
 };
-// PDF 미리보기에 띄울 출처 하나. bbox가 없으면 quote로 페이지 텍스트에서 위치를 찾는다
 interface PdfTarget {
   key: string;
   page: number;
@@ -127,7 +136,9 @@ export const AnalysisView: React.FC<{
   const [conditions, setConditions] = useState<Condition[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
-  const [activeJobId, setActiveJobId] = useState<string>(() => (projectId ? getActiveJob(projectId, "extraction") || "" : ""));
+  const [activeJobId, setActiveJobId] = useState<string>(() =>
+    projectId ? getActiveJob(projectId, "extraction") || "" : "",
+  );
   const [extractProgress, setExtractProgress] = useState<{
     completed: number;
     total: number;
@@ -237,6 +248,7 @@ export const AnalysisView: React.FC<{
       .catch((e) => setMessage(errorMessage(e)));
   }, [load]);
 
+  // 요구사항 추출 작업 진행 상태를 주기적으로 확인하는 로직
   useEffect(() => {
     if (!activeJobId || !projectId) return;
     let active = true;
@@ -329,6 +341,7 @@ export const AnalysisView: React.FC<{
     setUnsavedChanges(true);
     setMessage("");
   };
+  // 요구사항 및 수락 조건 편집 내용을 저장하는 로직
   const save = useCallback(
     async (event?: React.FormEvent) => {
       event?.preventDefault();
@@ -443,6 +456,8 @@ export const AnalysisView: React.FC<{
       saveBeforeLeaveRef.current = null;
     };
   }, [saveBeforeLeaveRef, save, editing]);
+
+  // 기획서 문서 파싱을 요청하는 로직
   const parse = async () => {
     if (!document) return;
     setBusy(true);
@@ -495,8 +510,7 @@ export const AnalysisView: React.FC<{
       if (["queued", "running"].includes(job.status)) {
         if (projectId) saveActiveJob(projectId, "extraction", job.id);
         setActiveJobId(job.id);
-      }
-      else {
+      } else {
         setMessage(
           job.error?.message ||
             job.missing_features?.map((f) => f.message).join(" / ") ||
@@ -744,7 +758,7 @@ export const AnalysisView: React.FC<{
     }),
     [],
   );
-  // 요구사항 자체의 출처 + 각 수락 조건의 출처
+  // 선택한 요구사항과 수락 조건의 원문 출처를 모으는 로직
   const selectedRefs = useMemo(() => {
     if (!selected) return [] as PdfTarget[];
     const list: PdfTarget[] = [];
@@ -760,7 +774,6 @@ export const AnalysisView: React.FC<{
     );
     return list;
   }, [selected, refTarget]);
-  // 직접 고른 출처가 없으면: 편집 중엔 선택한 원문 블록, 아니면 선택한 요구사항의 첫 출처
   const activeTarget: PdfTarget | null =
     pdfTarget ??
     (editing
@@ -843,7 +856,6 @@ export const AnalysisView: React.FC<{
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      {/* AI 요구사항 추출 전용 로딩 모달 */}
       <ExtractionLoadingModal
         isOpen={Boolean(activeJobId)}
         progress={extractProgress}
@@ -889,10 +901,9 @@ export const AnalysisView: React.FC<{
         </p>
       )}
 
-      {/* 명세 분석 워크플로우 컨트롤 바 */}
+      {/* 상단 문서 선택 및 분석 실행 영역 */}
       <div className="bg-white rounded-xl border border-slate-200/90 p-4 shadow-sm space-y-3.5">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-100">
-          {/* 기획서 선택 및 문서 상태 */}
           <div className="flex flex-wrap items-center gap-2.5">
             <label
               htmlFor="doc-select"
@@ -932,7 +943,6 @@ export const AnalysisView: React.FC<{
               ))}
             </select>
 
-            {/* 상태 뱃지 */}
             {blocks.length > 0 ? (
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200/60">
                 <svg
@@ -978,7 +988,6 @@ export const AnalysisView: React.FC<{
             )}
           </div>
 
-          {/* 파이프라인 단계 인디케이터 */}
           <div className="text-xs flex items-center gap-1.5 text-slate-400">
             <span className="font-semibold text-slate-600">진행 순서:</span>
             <span
@@ -1001,10 +1010,8 @@ export const AnalysisView: React.FC<{
           </div>
         </div>
 
-        {/* 액션 버튼 그룹 & 안내 */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
           <div className="flex flex-wrap items-center gap-2.5">
-            {/* 1단계: 문서 파싱 버튼 */}
             <Button
               onClick={parse}
               variant={blocks.length === 0 ? "primary" : "secondary"}
@@ -1055,7 +1062,6 @@ export const AnalysisView: React.FC<{
 
             <div className="h-5 w-px bg-slate-200 hidden sm:block" />
 
-            {/* 2단계: AI 요구사항 자동 추출 버튼 */}
             <Button
               onClick={extract}
               variant="primary"
@@ -1085,7 +1091,6 @@ export const AnalysisView: React.FC<{
               <span>AI 요구사항 추출</span>
             </Button>
 
-            {/* 보조: 수동 추가 버튼 */}
             <Button
               variant="secondary"
               onClick={() => startEdit(true)}
@@ -1110,7 +1115,6 @@ export const AnalysisView: React.FC<{
             </Button>
           </div>
 
-          {/* 현재 추천 액션 가이드 텍스트 */}
           <div className="text-xs text-slate-500 self-center">
             {blocks.length === 0 && (
               <span className="text-blue-600 font-medium">
@@ -1194,9 +1198,9 @@ export const AnalysisView: React.FC<{
           )}
         </div>
       )}
+      {/* 좌측 원문 블록과 우측 요구사항 검토 영역 */}
       <div className="grid xl:grid-cols-[320px_1fr] gap-5">
         <Card title="문서 원문" description={`${blocks.length}개 블록`}>
-          {/* 원문 출처 쪽수 필터 및 카테고리 드롭다운 */}
           <div className="space-y-3 mb-4 p-3 bg-slate-50/80 rounded-xl border border-slate-200/80">
             {availablePages.length > 1 && (
               <div>
@@ -1304,7 +1308,6 @@ export const AnalysisView: React.FC<{
             onChange={(e) => setSearch(e.target.value)}
           />
 
-          {/* 상단 다중 선택 체크박스 바 */}
           {reqs.length > 0 && (
             <div className="flex items-center justify-between py-2 px-1 text-xs border-b border-slate-200 mt-2 mb-2 bg-slate-50/60 rounded-md">
               <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 select-none">
@@ -1558,7 +1561,6 @@ export const AnalysisView: React.FC<{
                         </div>
                       </div>
 
-                      {/* 고급 설정: 수치 제약(Constraint) */}
                       <div className="pt-2 border-t border-slate-100 text-xs space-y-2">
                         <div className="flex items-center justify-between">
                           <label className="inline-flex items-center gap-1.5 font-medium text-slate-700 cursor-pointer">
@@ -1740,7 +1742,6 @@ export const AnalysisView: React.FC<{
                           </div>
                         )}
 
-                        {/* 고급 설정: 관련 조건 연결 */}
                         <div className="space-y-1.5 pt-1">
                           <label className="block text-[11px] font-semibold text-slate-600">
                             관련 조건 연결 (선택)

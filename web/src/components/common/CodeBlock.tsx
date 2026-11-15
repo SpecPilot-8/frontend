@@ -1,8 +1,17 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 구문 강조와 줄 번호 및 줄별 상태 하이라이트를 지원하는 공통 코드 블록 컴포넌트
+ * - 주요 기능:
+ *   1) 파일 확장자 기반 언어 감지 및 구문 강조 처리
+ *   2) 줄 번호 표시 및 일치와 불일치 줄 배경색 구분
+ *   3) 클립보드 코드 복사 기능
+ */
+
 import React, { useMemo, useState } from 'react';
 import Prism from 'prismjs';
 import 'prismjs/themes/prism-tomorrow.css';
 
-// Prism 언어 확장팩
 import 'prismjs/components/prism-clike';
 import 'prismjs/components/prism-javascript';
 import 'prismjs/components/prism-typescript';
@@ -14,6 +23,7 @@ import 'prismjs/components/prism-sql';
 import 'prismjs/components/prism-yaml';
 import 'prismjs/components/prism-json';
 
+// 파일 경로에서 구문 강조 언어를 판별하는 로직
 function getLanguageFromFilePath(filePath?: string): string {
   if (!filePath) return 'javascript';
   const ext = filePath.split('.').pop()?.toLowerCase();
@@ -93,6 +103,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
 
   const lang = useMemo(() => language || getLanguageFromFilePath(filePath), [language, filePath]);
 
+  // 줄 단위로 구문 강조 HTML을 생성하는 로직
   const lines = useMemo(() => {
     const grammar = Prism.languages[lang] || Prism.languages.javascript || Prism.languages.clike;
     const rawLines = (code || '').split('\n');
@@ -130,7 +141,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
 
   return (
     <div className={`rounded-lg overflow-hidden border border-slate-700 bg-[#1d1f21] text-slate-200 font-mono text-[13px] shadow-sm ${className}`}>
-      {/* Header bar */}
+      {/* 상단 파일 정보 및 복사 버튼 영역 */}
       {(headerTitle || filePath || badge) && (
         <div className="flex items-center justify-between px-3.5 py-2 bg-[#282a2e] border-b border-slate-700/80 text-xs">
           <div className="flex items-center gap-2 min-w-0">
@@ -172,7 +183,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({
         </div>
       )}
 
-      {/* Code body */}
+      {/* 코드 본문 및 줄 번호 영역 */}
       <div className="overflow-x-auto p-3.5 leading-relaxed selection:bg-blue-500/30 selection:text-white">
         <table className="w-full border-collapse">
           <tbody>

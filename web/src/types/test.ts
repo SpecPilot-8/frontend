@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 테스트 사양서와 시험 케이스 및 수행 결과에 사용되는 데이터 타입을 정의한 파일
+ * - 주요 기능:
+ *   1) 시험 단계와 요구사항 연결 정보 인터페이스 정의
+ *   2) 시험 설계 검토 및 수행 기록 인터페이스 정의
+ */
+
 export interface RequirementLink {
   requirement_id: string;
   requirement_revision: number;

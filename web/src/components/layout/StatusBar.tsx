@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 화면 하단에 검증 요약과 명세 및 코드 상태를 표시하는 상태 표시줄 컴포넌트
+ * - 주요 기능:
+ *   1) 검증 요약과 명세 및 코드 스냅샷 상태 문자열 조합
+ *   2) 하단 상태바 및 표시 언어 출력
+ */
+
 import React from 'react';
 
 interface StatusBarProps {
@@ -13,7 +22,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   verificationSummary,
   language = '한국어',
 }) => {
-  // 동적으로 들어온 상태 조각들을 포맷팅
+  // 표시할 상태 문자열을 조합하는 로직
   const statusSegments = [
     verificationSummary,
     specVersion ? `명세 ${specVersion}` : undefined,

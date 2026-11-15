@@ -1,3 +1,13 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 기획서 요구사항과 소스 코드 스냅샷 간의 매칭 및 판정 결과를 조회하고 검토하는 화면
+ * - 주요 기능:
+ *   1) 코드 검증 실행 및 진입 파일 수동 지정
+ *   2) 실행 이력 선택과 요구사항 상태별 검색 및 필터링
+ *   3) 요구사항 상세 판정 확인 및 검증 결과 엑셀 내보내기
+ */
+
 import React, { useCallback, useEffect, useState } from 'react';
 import type { StepId, RequirementItem } from '../types';
 import { formatRequirementTitle } from '../types/verification';
@@ -29,6 +39,7 @@ interface RunInput { snapshot_id: string; requirement_versions: { requirement_id
 interface Job { id: string; operation: string; status: string; result_ref?: { id: string }; error?: { message: string }; missing_features: { message: string }[]; usage?: Record<string, number>; analysis_metrics?: AnalysisMetrics }
 const labels: Record<string, string> = { implemented: '구현됨', partial: '부분 구현', mismatch: '불일치', not_found: '미구현 후보', needs_review: '확인 필요', not_statically_verifiable: '정적 검증 불가', not_run: '미분석' };
 const runStatusLabel: Record<string, string> = { completed: '완료', running: '분석 중', failed: '실패', queued: '대기', blocked: '미연결', cancelled: '중단' };
+// 실행 시각을 한국어 날짜와 시간으로 변환하는 로직
 const formatRunDate = (isoString: string) => {
   try {
     const d = new Date(isoString);
@@ -42,6 +53,7 @@ const formatRunDate = (isoString: string) => {
     return isoString;
   }
 };
+// 소요 시간을 분과 초 단위로 변환하는 로직
 const formatDuration = (ms: number) => {
   const totalSec = Math.round(ms / 1000);
   if (totalSec >= 60) {
@@ -51,6 +63,7 @@ const formatDuration = (ms: number) => {
   }
   return `${(ms / 1000).toFixed(1)}초`;
 };
+// 판정 상태별 배지 색상을 구분하는 로직
 const statusBadgeStyles: Record<string, string> = {
   implemented: 'bg-emerald-50 text-emerald-700 border-emerald-200',
   partial: 'bg-amber-50 text-amber-700 border-amber-200',
@@ -83,6 +96,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   const [pendingInput, setPendingInput] = useState<RunInput | null>(null);
   const base = `/projects/${projectId}`;
 
+  // 검증 실행 이력과 요구사항 목록을 불러오는 로직
   const load = useCallback(async () => {
     if (!projectId) return;
     const [items, jobs, reqs] = await Promise.all([
@@ -107,6 +121,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     return () => { active = false; };
   }, [runId, base, filter, search, refresh]);
 
+  // 진행 중인 검증 작업 상태를 주기적으로 확인하는 로직
   useEffect(() => {
     if (!activeJob || !projectId) return;
     let active = true;
@@ -169,13 +184,13 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     };
   };
 
+  // 자동 범위 분석으로 코드 검증을 시작하는 로직
   const startAutoVerification = async () => {
     setBusy(true); setMessage('검증 요구사항과 소스코드를 확인하고 있습니다...');
     try {
       const input = await fetchVerificationInput();
       const options = await api<ScopeOptions>(`${base}/verification-runs/prepare`, jsonRequest('POST', input));
 
-      // AI 및 키워드 휴리스틱으로 추론된 추천 진입 파일들로 자동 구성
       const defaultStack = ['spring', 'react'].includes(options.stack) ? (options.stack as 'spring' | 'react') : 'react';
       const autoEntries: Record<string, string[]> = {};
       for (const group of options.groups) {
@@ -258,6 +273,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       else { setMessage(job.error?.message || job.missing_features.map(f => f.message).join(' / ')); setBusy(false); }
     } catch (e) { setMessage(errorMessage(e)); setBusy(false); }
   };
+  // 요구사항 추적표를 엑셀 파일로 내보내는 로직
   const exportTrace = async () => {
     setBusy(true);
     try {
@@ -303,6 +319,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       <Button variant="secondary" onClick={() => onNavigateStep('SETUP')}>모델·코드 설정</Button>
       <Button variant="secondary" onClick={() => onNavigateStep('TEST_SPEC')}>테스트 사양서로 이동</Button>
     </div>
+    {/* 요구사항 추적표 메인 영역 */}
     <Card title="요구사항 추적표" description={run ? `실행 상태: ${runStatusLabel[run.status] || run.status}${run.model_config_snapshot?.model ? ` · 모델 ${run.model_config_snapshot.model}` : ''} · 스냅샷 ${run.snapshot_id}` : '아직 검증 실행이 없습니다'}>
       <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-slate-50/80 border border-slate-200/80 rounded-xl mb-3">
         <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0">

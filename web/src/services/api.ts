@@ -1,3 +1,13 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: 백엔드 서버와 통신하는 공통 요청 함수와 도메인별 API 호출 기능을 모아둔 파일
+ * - 주요 기능:
+ *   1) 프로젝트 생성과 조회 및 문서와 소스 코드 업로드 요청
+ *   2) 비동기 분석 작업 상태 폴링과 세션 작업 식별자 관리
+ *   3) 페이지네이션 전체 조회 및 공통 에러 메시지 처리
+ */
+
 import { projectStackLabel } from "../projectStacks";
 import type { TestSpecification } from "../types/test";
 import type {
@@ -31,6 +41,7 @@ export class APIError extends Error {
   }
 }
 
+// 서버 응답 상태를 확인하고 에러를 변환하는 로직
 export const handleResponse = async (res: Response) => {
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
@@ -109,6 +120,7 @@ export const fetchProjectSetup = async (
   }
 };
 
+// 프로젝트 기본 설정을 생성하거나 수정하는 로직
 export const saveProjectSetup = async (
   data: { projectName?: string; techStack?: string },
   projectId?: string,
@@ -241,6 +253,7 @@ export interface PollJobOptions {
   maxConsecutiveErrors?: number;
 }
 
+// 비동기 작업 진행 상태를 주기적으로 조회하는 로직
 export async function pollJobStatus(
   projectId: string,
   jobId: string,
@@ -384,6 +397,7 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
 export const jsonRequest = (method: string, body: unknown): RequestInit => ({
   method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
 });
+// 페이지네이션된 목록 전체를 끝까지 불러오는 로직
 export async function fetchAll<T>(path: string): Promise<T[]> {
   const items: T[] = [];
   let total = Infinity;

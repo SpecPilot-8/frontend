@@ -1,3 +1,12 @@
+/**
+ * - 담당 파트: 프런트 엔드
+ * - 작성자: 이시형
+ * - 페이지 개요: VS Code 확장 프로그램에서 백엔드 서버로 프로젝트와 스냅샷 정보를 요청하는 API 호출 파일
+ * - 주요 기능:
+ *   1) 백엔드 GET 요청 공통 처리 및 예외 메시지 변환
+ *   2) 프로젝트 목록과 스냅샷 목록 및 스냅샷 원본 파일 조회
+ */
+
 import type { SnapshotPayload } from "./restore";
 
 export interface ProjectSummary {
@@ -12,6 +21,7 @@ export interface SnapshotSummary {
   created_at?: string;
 }
 
+// 백엔드 서버로 GET 요청을 보내고 JSON 응답을 반환하는 로직
 async function getJson<T>(baseUrl: string, route: string): Promise<T> {
   const url = `${baseUrl.replace(/\/+$/, "")}${route}`;
   let response: Response;
@@ -28,7 +38,7 @@ async function getJson<T>(baseUrl: string, route: string): Promise<T> {
         message = `${body.error.message} (${response.status})`;
       }
     } catch {
-      // 오류 본문이 JSON이 아니면 기본 메시지를 쓴다.
+      // 오류 응답 파싱 실패 예외 무시
     }
     throw new Error(message);
   }

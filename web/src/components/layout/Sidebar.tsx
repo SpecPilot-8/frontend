@@ -10,6 +10,8 @@
 
 import React, { useState } from "react";
 import type { StepId } from "../../types";
+import { useProject } from "../../contexts/ProjectContext";
+import { UsageSummaryModal } from "../common/UsageSummaryModal";
 
 interface SidebarProps {
   currentStep: StepId;
@@ -41,9 +43,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
   techStack = "기술 스택 미지정",
   disabled = false,
 }) => {
+  const { projectId } = useProject();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
 
   return (
+    <>
     <aside
       className={`relative ${
         isCollapsed ? "w-16 px-2" : "w-56 px-4"
@@ -151,13 +156,26 @@ export const Sidebar: React.FC<SidebarProps> = ({
       {/* 하단 프로젝트 전환 영역 */}
       <div
         className={`pt-4 border-t border-slate-100 ${
-          isCollapsed ? "flex justify-center" : "space-y-2.5"
+          isCollapsed ? "flex flex-col items-center gap-2" : "space-y-2"
         }`}
       >
         {!isCollapsed && (
           <div className="text-[11px] text-slate-400 px-1 truncate">
             명세 → 코드 검증 → QA
           </div>
+        )}
+        {projectId && (
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={() => setUsageOpen(true)}
+            title="토큰 · 비용 현황"
+            className={`w-full py-2 bg-white border border-slate-200 rounded-lg text-xs font-medium text-slate-700 hover:bg-slate-50 transition-colors shadow-sm cursor-pointer ${
+              isCollapsed ? "px-0 text-[10px]" : ""
+            }`}
+          >
+            {isCollapsed ? "m" : "토큰 · 비용 현황"}
+          </button>
         )}
         <button
           type="button"
@@ -172,5 +190,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
         </button>
       </div>
     </aside>
+    <UsageSummaryModal
+      isOpen={usageOpen}
+      onClose={() => setUsageOpen(false)}
+      projectId={projectId}
+      projectName={projectName}
+    />
+    </>
   );
 };

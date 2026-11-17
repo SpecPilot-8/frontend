@@ -25,13 +25,13 @@ import {
   APIError,
   BASE_URL,
 } from '../services/api';
-import { Button, Card, PageHeader } from '../components/common';
+import { Button, Card, PageHeader, estimateJobCostUsd, formatUsd, getJobReusedCalls } from '../components/common';
 import { VerificationDetail } from '../components/verification/VerificationDetail';
 import { VerificationScopeDialog } from '../components/verification/VerificationScopeDialog';
 import { VerificationLoadingModal } from '../components/verification/VerificationLoadingModal';
 import type { ScopeOptions, VerificationScope } from '../components/verification/VerificationScopeDialog';
 
-interface StageMetrics { calls?: number; submitted_chunks?: number; duration_ms?: number; usage?: Record<string, number> }
+interface StageMetrics { calls?: number; reused_calls?: number; submitted_chunks?: number; duration_ms?: number; usage?: Record<string, number> }
 interface AnalysisMetrics { scope_duration_ms?: number | null; matching?: StageMetrics; condition_judgment?: StageMetrics }
 interface Run { id: string; created_at: string; snapshot_id: string; status: string; job_id?: string; model_config_snapshot?: { provider?: string; model?: string } }
 interface Row { requirement_id: string; requirement_revision: number; stable_key: string; title: string; topic_title: string; subtopic_title: string; analysis_state: string; status: string | null; reason: string; evidence_count: number }
@@ -293,6 +293,8 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   const totalInputTokens = runJob?.usage?.input_tokens ?? ((metrics?.matching?.usage?.input_tokens || 0) + (metrics?.condition_judgment?.usage?.input_tokens || 0));
   const totalOutputTokens = runJob?.usage?.output_tokens ?? ((metrics?.matching?.usage?.output_tokens || 0) + (metrics?.condition_judgment?.usage?.output_tokens || 0));
   const totalDurationMs = (metrics?.scope_duration_ms || 0) + (metrics?.matching?.duration_ms || 0) + (metrics?.condition_judgment?.duration_ms || 0);
+  const totalReusedCalls = getJobReusedCalls(runJob);
+  const estimatedCostUsd = estimateJobCostUsd(runJob, run?.model_config_snapshot?.model, run?.model_config_snapshot?.provider);
   return <div className="max-w-7xl mx-auto space-y-5">
     <VerificationLoadingModal
       isOpen={!!activeJob}
@@ -334,9 +336,12 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
           <p className="text-xs font-medium text-slate-700 bg-slate-100/80 border border-slate-200/70 px-3 py-1.5 rounded-lg">
             선택 범위 <strong className="text-slate-900">{summary.total || 0}건</strong> · 구현됨 <strong className="text-emerald-600">{summary.implemented || 0}건</strong> · 구현율 <strong className="text-blue-600">{(summary.implementation_rate || 0).toFixed(1)}%</strong> · 미분석 <strong className="text-slate-500">{summary.not_run || 0}건</strong>
           </p>
-          {(totalInputTokens > 0 || totalOutputTokens > 0 || totalDurationMs > 0) && (
+          {(totalInputTokens > 0 || totalOutputTokens > 0 || totalDurationMs > 0 || totalReusedCalls > 0) && (
             <p className="text-xs font-medium text-slate-600 bg-blue-50/60 border border-blue-200/70 px-3 py-1.5 rounded-lg">
-              입력 <strong className="text-slate-800">{totalInputTokens.toLocaleString()}</strong> · 출력 <strong className="text-slate-800">{totalOutputTokens.toLocaleString()}</strong> 토큰{totalDurationMs > 0 ? <> · 처리시간 <strong className="text-slate-800">{formatDuration(totalDurationMs)}</strong></> : null}
+              입력 <strong className="text-slate-800">{totalInputTokens.toLocaleString()}</strong> · 출력 <strong className="text-slate-800">{totalOutputTokens.toLocaleString()}</strong> 토큰
+              {totalReusedCalls > 0 ? <> · 캐시 재사용 <strong className="text-slate-800">{totalReusedCalls}회</strong></> : null}
+              {totalDurationMs > 0 ? <> · 처리시간 <strong className="text-slate-800">{formatDuration(totalDurationMs)}</strong></> : null}
+              {estimatedCostUsd > 0 ? <> · 예상 비용 <strong className="text-slate-800">{formatUsd(estimatedCostUsd)}</strong></> : null}
             </p>
           )}
         </div>

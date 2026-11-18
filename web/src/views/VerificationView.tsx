@@ -29,6 +29,8 @@ import { Button, Card, PageHeader, estimateJobCostUsd, formatUsd, getJobReusedCa
 import { VerificationDetail } from '../components/verification/VerificationDetail';
 import { VerificationScopeDialog } from '../components/verification/VerificationScopeDialog';
 import { VerificationLoadingModal } from '../components/verification/VerificationLoadingModal';
+import { VerificationComparePanel } from '../components/verification/VerificationComparePanel';
+import type { VerificationCompareResponse } from '../components/verification/VerificationComparePanel';
 import type { ScopeOptions, VerificationScope } from '../components/verification/VerificationScopeDialog';
 
 interface StageMetrics { calls?: number; reused_calls?: number; submitted_chunks?: number; duration_ms?: number; estimated_cost_usd?: number | null; usage?: Record<string, number> }
@@ -94,6 +96,11 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   const [refresh, setRefresh] = useState(0);
   const [scopeOptions, setScopeOptions] = useState<ScopeOptions | null>(null);
   const [pendingInput, setPendingInput] = useState<RunInput | null>(null);
+  const [compareRunId, setCompareRunId] = useState('');
+  const [compareData, setCompareData] = useState<VerificationCompareResponse | null>(null);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [compareError, setCompareError] = useState('');
+  const [onlyChanged, setOnlyChanged] = useState(false);
   const base = `/projects/${projectId}`;
 
   // 검증 실행 이력과 요구사항 목록을 불러오는 로직
@@ -120,6 +127,35 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     }
     return () => { active = false; };
   }, [runId, base, filter, search, refresh]);
+
+  // 선택한 비교 기준 실행과 현재 실행의 판정 차이를 조회하는 로직
+  useEffect(() => {
+    const activeCompareId = compareRunId && compareRunId !== runId ? compareRunId : '';
+    if (!runId || !activeCompareId) {
+      return;
+    }
+    let active = true;
+    void Promise.resolve().then(async () => {
+      if (active) {
+        setCompareLoading(true);
+        setCompareError('');
+      }
+      try {
+        const res = await api<VerificationCompareResponse>(
+          `${base}/verification-runs/${runId}/compare?base=${encodeURIComponent(activeCompareId)}`
+        );
+        if (active) setCompareData(res);
+      } catch (e) {
+        if (active) {
+          setCompareData(null);
+          setCompareError(errorMessage(e));
+        }
+      } finally {
+        if (active) setCompareLoading(false);
+      }
+    });
+    return () => { active = false; };
+  }, [runId, compareRunId, base, refresh]);
 
   // 진행 중인 검증 작업 상태를 주기적으로 확인하는 로직
   useEffect(() => {
@@ -295,6 +331,11 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   const totalDurationMs = (metrics?.scope_duration_ms || 0) + (metrics?.matching?.duration_ms || 0) + (metrics?.condition_judgment?.duration_ms || 0);
   const totalReusedCalls = getJobReusedCalls(runJob);
   const estimatedCostUsd = estimateJobCostUsd(runJob, run?.model_config_snapshot?.model, run?.model_config_snapshot?.provider);
+  const activeCompareRunId = compareRunId && compareRunId !== runId ? compareRunId : '';
+  const activeCompareData = activeCompareRunId && compareData?.run_id === runId && compareData?.base_run_id === activeCompareRunId ? compareData : null;
+  const compareReqMap = new Map((activeCompareData?.requirements || []).map(item => [item.key, item]));
+  const visibleRows = activeCompareData && onlyChanged ? rows.filter(r => compareReqMap.has(r.stable_key)) : rows;
+  const compareBaseRun = runs.find(r => r.id === activeCompareRunId);
   return <div className="max-w-7xl mx-auto space-y-5">
     <VerificationLoadingModal
       isOpen={!!activeJob}
@@ -326,6 +367,29 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
       <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-slate-50/80 border border-slate-200/80 rounded-xl mb-3">
         <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0">
           <select aria-label="검증 실행 선택" value={runId} disabled={busy} onChange={e => { setRunId(e.target.value); setMessage(''); }} className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-white shadow-2xs focus:outline-none focus:border-blue-500 max-w-xs truncate">{runs.map(r => <option key={r.id} value={r.id}>{formatRunDate(r.created_at)} · {runStatusLabel[r.status] || r.status}</option>)}</select>
+          {runs.length > 1 && (
+            <select
+              aria-label="비교 기준 실행 선택"
+              value={activeCompareRunId}
+              disabled={busy}
+              onChange={e => {
+                setCompareRunId(e.target.value);
+                if (!e.target.value) {
+                  setCompareData(null);
+                  setCompareError('');
+                  setOnlyChanged(false);
+                }
+              }}
+              className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-white shadow-2xs focus:outline-none focus:border-blue-500 max-w-xs truncate"
+            >
+              <option value="">이전 실행 비교 안 함</option>
+              {runs.filter(r => r.id !== runId).map(r => (
+                <option key={r.id} value={r.id}>
+                  비교: {formatRunDate(r.created_at)} · {runStatusLabel[r.status] || r.status}
+                </option>
+              ))}
+            </select>
+          )}
           <input aria-label="추적표 검색" placeholder="기능·주제 검색" value={search} onChange={e => setSearch(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-white shadow-2xs focus:outline-none focus:border-blue-500 w-52" />
           <select aria-label="판정 필터" value={filter} onChange={e => setFilter(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-white shadow-2xs focus:outline-none focus:border-blue-500"><option value="">전체</option>{Object.entries(labels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
         </div>
@@ -347,7 +411,25 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
         </div>
         <p className="text-xs text-slate-400">Excel은 현재 검색·필터와 관계없이 선택한 검증 실행 전체를 출력합니다.</p>
       </div>
-      <div className={`rounded-xl border border-slate-200 overflow-auto ${rows.length > 10 ? 'max-h-160' : ''}`}>
+      {activeCompareRunId && (
+        <VerificationComparePanel
+          data={activeCompareData}
+          loading={compareLoading}
+          error={compareError}
+          baseLabel={compareBaseRun ? formatRunDate(compareBaseRun.created_at) : activeCompareRunId.slice(0, 8)}
+          currentLabel={run ? formatRunDate(run.created_at) : runId.slice(0, 8)}
+          statusLabels={labels}
+          onlyChanged={onlyChanged}
+          onToggleOnlyChanged={setOnlyChanged}
+          onClose={() => {
+            setCompareRunId('');
+            setCompareData(null);
+            setCompareError('');
+            setOnlyChanged(false);
+          }}
+        />
+      )}
+      <div className={`rounded-xl border border-slate-200 overflow-auto ${visibleRows.length > 10 ? 'max-h-160' : ''}`}>
         <table className="w-full min-w-230 text-sm text-left border-collapse">
           <thead className="bg-slate-50 border-b border-slate-200 text-xs font-semibold text-slate-600 sticky top-0 z-10">
             <tr>
@@ -360,8 +442,18 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 bg-white">
-            {rows.map(r => {
+            {visibleRows.map(r => {
               const statusKey = r.status || 'not_run';
+              const diff = compareReqMap.get(r.stable_key);
+              const diffText = !diff
+                ? ''
+                : diff.change === 'added'
+                  ? '이전 실행 대비 신규'
+                  : diff.before_status !== diff.after_status
+                    ? `${labels[diff.before_status || 'not_run'] || diff.before_status || '미분석'} → ${labels[diff.after_status || 'not_run'] || diff.after_status || '미분석'}`
+                    : diff.before_revision !== diff.after_revision
+                      ? `개정 v${diff.before_revision} → v${diff.after_revision}`
+                      : '';
               return (
                 <tr key={r.requirement_id} className="hover:bg-slate-50/80 transition-colors">
                   <td className="px-4 py-3.5 align-middle text-xs font-medium text-slate-700 break-keep leading-snug">
@@ -377,6 +469,9 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
                       {labels[statusKey]}
                     </span>
                     <small className="block mt-1 text-[11px] text-slate-400">{runStatusLabel[r.analysis_state] || r.analysis_state}</small>
+                    {diffText && (
+                      <small className="block mt-0.5 text-[11px] font-medium text-slate-600">{diffText}</small>
+                    )}
                   </td>
                   <td className="px-3 py-3.5 align-middle text-center whitespace-nowrap">
                     <span className={`inline-flex items-center justify-center px-2 py-0.5 rounded-md text-xs font-semibold ${r.evidence_count > 0 ? 'bg-blue-50 text-blue-700 border border-blue-100' : 'bg-slate-100 text-slate-500'}`}>
@@ -394,7 +489,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
             })}
           </tbody>
         </table>
-        {!rows.length && <p className="p-6 text-center text-sm text-slate-500 bg-white">현재 선택 범위의 요구사항이 없습니다.</p>}
+        {!visibleRows.length && <p className="p-6 text-center text-sm text-slate-500 bg-white">{onlyChanged && activeCompareData ? '비교 대상 실행과 비교해 변경된 요구사항이 없습니다.' : '현재 선택 범위의 요구사항이 없습니다.'}</p>}
       </div>
     </Card>
   </div>;

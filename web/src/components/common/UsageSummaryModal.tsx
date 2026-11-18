@@ -24,6 +24,7 @@ export interface StageAnalysisMetrics {
   reused_calls?: number;
   submitted_chunks?: number;
   duration_ms?: number;
+  estimated_cost_usd?: number | null;
   usage?: UsageTokens;
 }
 
@@ -32,6 +33,7 @@ export interface JobAnalysisMetrics {
   matching?: StageAnalysisMetrics;
   condition_judgment?: StageAnalysisMetrics;
   duration_ms?: number;
+  estimated_cost_usd?: number | null;
   reused_calls?: number;
 }
 
@@ -41,6 +43,8 @@ export interface UsageJobRecord {
   status: string;
   created_at?: string;
   updated_at?: string;
+  duration_ms?: number;
+  estimated_cost_usd?: number | null;
   model_config_snapshot?: {
     provider?: string;
     model?: string;
@@ -88,16 +92,22 @@ export function estimateTokenCostUsd(
 }
 
 // 작업별 예상 비용 계산 로직
-// 매칭과 판정 단계별 사용량이 있으면 합산하고 없으면 작업 전체 usage 사용
+// 백엔드가 내려준 estimated_cost_usd 값을 우선 사용하고 미기록 이력만 토큰 단가로 추정
 export function estimateJobCostUsd(
   job?: UsageJobRecord,
   fallbackModel?: string,
   fallbackProvider?: string
 ): number {
   if (!job) return 0;
+  if (typeof job.estimated_cost_usd === 'number') {
+    return job.estimated_cost_usd;
+  }
+  const metrics = job.analysis_metrics;
+  if (typeof metrics?.estimated_cost_usd === 'number') {
+    return metrics.estimated_cost_usd;
+  }
   const model = job.model_config_snapshot?.model || fallbackModel;
   const provider = job.model_config_snapshot?.provider || fallbackProvider;
-  const metrics = job.analysis_metrics;
   const hasStageUsage =
     (metrics?.matching?.usage && Object.keys(metrics.matching.usage).length > 0) ||
     (metrics?.condition_judgment?.usage && Object.keys(metrics.condition_judgment.usage).length > 0);
@@ -128,9 +138,12 @@ export function formatMetricsDuration(ms: number): string {
 }
 
 // 작업 소요 시간 계산 로직
-// 단계별 duration_ms 합계를 우선 사용하고 없을 때는 완료된 작업의 생성과 갱신 시각 차이로 산출
+// 백엔드 job 또는 단계별 duration_ms 합계를 우선 사용하고 없을 때는 완료 작업 시각 차이로 산출
 export function getJobDurationMs(job?: UsageJobRecord): number {
   if (!job) return 0;
+  if (typeof job.duration_ms === 'number' && job.duration_ms > 0) {
+    return job.duration_ms;
+  }
   const m = job.analysis_metrics;
   const fromStages =
     (m?.scope_duration_ms || 0) +

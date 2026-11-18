@@ -31,12 +31,12 @@ import { VerificationScopeDialog } from '../components/verification/Verification
 import { VerificationLoadingModal } from '../components/verification/VerificationLoadingModal';
 import type { ScopeOptions, VerificationScope } from '../components/verification/VerificationScopeDialog';
 
-interface StageMetrics { calls?: number; reused_calls?: number; submitted_chunks?: number; duration_ms?: number; usage?: Record<string, number> }
-interface AnalysisMetrics { scope_duration_ms?: number | null; matching?: StageMetrics; condition_judgment?: StageMetrics }
+interface StageMetrics { calls?: number; reused_calls?: number; submitted_chunks?: number; duration_ms?: number; estimated_cost_usd?: number | null; usage?: Record<string, number> }
+interface AnalysisMetrics { scope_duration_ms?: number | null; matching?: StageMetrics; condition_judgment?: StageMetrics; estimated_cost_usd?: number | null }
 interface Run { id: string; created_at: string; snapshot_id: string; status: string; job_id?: string; model_config_snapshot?: { provider?: string; model?: string } }
 interface Row { requirement_id: string; requirement_revision: number; stable_key: string; title: string; topic_title: string; subtopic_title: string; analysis_state: string; status: string | null; reason: string; evidence_count: number }
 interface RunInput { snapshot_id: string; requirement_versions: { requirement_id: string; revision: number }[]; model_config_version: number }
-interface Job { id: string; operation: string; status: string; result_ref?: { id: string }; error?: { message: string }; missing_features: { message: string }[]; usage?: Record<string, number>; analysis_metrics?: AnalysisMetrics }
+interface Job { id: string; operation: string; status: string; duration_ms?: number; estimated_cost_usd?: number | null; result_ref?: { id: string }; error?: { message: string }; missing_features: { message: string }[]; usage?: Record<string, number>; analysis_metrics?: AnalysisMetrics }
 const labels: Record<string, string> = { implemented: '구현됨', partial: '부분 구현', mismatch: '불일치', not_found: '미구현 후보', needs_review: '확인 필요', not_statically_verifiable: '정적 검증 불가', not_run: '미분석' };
 const runStatusLabel: Record<string, string> = { completed: '완료', running: '분석 중', failed: '실패', queued: '대기', blocked: '미연결', cancelled: '중단' };
 // 실행 시각을 한국어 날짜와 시간으로 변환하는 로직

@@ -9,7 +9,7 @@
 
 import React from 'react';
 
-type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'outline';
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'outline' | 'warning';
 type ButtonSize = 'sm' | 'md' | 'lg';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -21,6 +21,7 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
 const VARIANT_MAP: Record<ButtonVariant, string> = {
   primary: 'bg-blue-600 text-white hover:bg-blue-700 border-transparent shadow-sm disabled:bg-blue-300',
   secondary: 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 disabled:bg-slate-100 disabled:text-slate-400',
+  warning: 'bg-amber-50 text-amber-800 border-amber-300 hover:bg-amber-100/80 disabled:bg-slate-100 disabled:text-slate-400 disabled:border-slate-200',
   ghost: 'bg-slate-100 text-slate-600 border-transparent hover:bg-slate-200 disabled:text-slate-300',
   outline: 'bg-transparent text-slate-600 border-slate-200 hover:bg-slate-50 disabled:text-slate-300',
 };

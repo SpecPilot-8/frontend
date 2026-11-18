@@ -36,6 +36,7 @@ import { TestSpecLoadingModal } from "../components/test/TestSpecLoadingModal";
 import { TestEvidenceDialog } from "../components/test/TestEvidenceDialog";
 import { TestStepDesignPanel } from "../components/test/TestStepDesignPanel";
 import { TestDesignReviewPanel } from "../components/test/TestDesignReviewPanel";
+import { TestQualityPanel } from "../components/test/TestQualityPanel";
 import { TestGenerationDialog } from "../components/test/TestGenerationDialog";
 import { TestRequirementComparison } from "../components/test/TestRequirementComparison";
 import type { GenerationPreviewPlan } from "../components/test/TestGenerationDialog";
@@ -45,6 +46,7 @@ import type {
   RequirementLink,
   DesignIntent,
   DesignReview,
+  QualityReport,
 } from "../types/test";
 
 type Spec = TestSpecification & {
@@ -175,6 +177,13 @@ export const TestSpecView: React.FC<{
   } | null>(null);
   const [designReview, setDesignReview] = useState<DesignReview | null>(null);
   const [designError, setDesignError] = useState("");
+  const [qualityReport, setQualityReport] = useState<{
+    specId: string;
+    revision: number;
+    data: QualityReport;
+  } | null>(null);
+  const [qualityError, setQualityError] = useState("");
+  const [qualityOpen, setQualityOpen] = useState(false);
   const [specLoading, setSpecLoading] = useState(false);
   const loadSequence = useRef(0);
   const detailRef = useRef<HTMLDivElement>(null);
@@ -217,6 +226,18 @@ export const TestSpecView: React.FC<{
       !filter || c.requirement_links.some((l) => l.requirement_id === filter),
   );
   const active = visible.find((c) => c.id === activeId) || visible[0];
+  const currentQuality =
+    spec &&
+    qualityReport?.specId === spec.id &&
+    qualityReport.revision === spec.revision
+      ? qualityReport.data
+      : null;
+  const qualityIssueCount = currentQuality
+    ? currentQuality.summary.boundary_missing +
+      currentQuality.summary.duplicates +
+      currentQuality.summary.invented_messages +
+      currentQuality.summary.borrowed_messages
+    : 0;
   const changed = Object.values(drafts).some(
     (d) => d.procedureChanged || d.executionChanged,
   );
@@ -270,6 +291,8 @@ export const TestSpecView: React.FC<{
       setExecutions({});
       setDesignReview(null);
       setDesignError("");
+      setQualityReport(null);
+      setQualityError("");
       try {
         const [current, items] = await Promise.all([
           api<Spec>(`/projects/${projectId}/test-specifications/${targetId}`),
@@ -277,7 +300,7 @@ export const TestSpecView: React.FC<{
             `/projects/${projectId}/test-cases?test_specification_id=${targetId}`,
           ),
         ]);
-        const [reqResults, records, review] = await Promise.all([
+        const [reqResults, records, review, quality] = await Promise.all([
           Promise.allSettled(
             current.requirement_versions.map((r) =>
               api<Req>(
@@ -297,10 +320,21 @@ export const TestSpecView: React.FC<{
           )
             .then((value) => ({ value, error: "" }))
             .catch((e) => ({ value: null, error: errorMessage(e) })),
+          api<QualityReport>(
+            `/projects/${projectId}/test-specifications/${targetId}/quality?revision=${current.revision}`,
+          )
+            .then((value) => ({ value, error: "" }))
+            .catch((e) => ({ value: null, error: errorMessage(e) })),
         ]);
         if (sequence !== loadSequence.current) return;
         setDesignReview(review.value);
         setDesignError(review.error);
+        setQualityReport(
+          quality.value
+            ? { specId: current.id, revision: current.revision, data: quality.value }
+            : null,
+        );
+        setQualityError(quality.error);
         const reqs = reqResults
           .filter((r) => r.status === "fulfilled")
           .map((r) => r.value);
@@ -946,7 +980,10 @@ export const TestSpecView: React.FC<{
               value={specId}
               className="min-w-0 max-w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white text-slate-800 shadow-2xs font-medium focus:outline-none focus:border-blue-500"
               disabled={editing || adding || busy}
-              onChange={(e) => setSpecId(e.target.value)}
+              onChange={(e) => {
+                setQualityOpen(false);
+                setSpecId(e.target.value);
+              }}
             >
               {specs.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -959,6 +996,37 @@ export const TestSpecView: React.FC<{
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant={
+                currentQuality && !specLoading && qualityIssueCount > 0
+                  ? "warning"
+                  : "secondary"
+              }
+              size="md"
+              disabled={!spec || busy || editing || adding}
+              onClick={() => setQualityOpen(true)}
+              className="flex items-center gap-1.5 shadow-2xs text-xs"
+            >
+              <svg
+                className={`w-3.5 h-3.5 ${
+                  currentQuality && !specLoading && qualityIssueCount > 0
+                    ? "text-amber-700"
+                    : "text-slate-500"
+                }`}
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+              <span>품질 점검</span>
+            </Button>
+
             <Button
               variant="secondary"
               size="md"
@@ -1061,6 +1129,32 @@ export const TestSpecView: React.FC<{
             </p>
           ))}
         </details>
+      )}
+      {spec && (
+        <TestQualityPanel
+          key={`quality-${spec.id}`}
+          open={qualityOpen}
+          report={currentQuality}
+          error={qualityError}
+          loading={specLoading}
+          dirty={changed}
+          cases={cases}
+          onClose={() => setQualityOpen(false)}
+          onRetry={() => {
+            void loadSpec().catch((e) => setMessage(errorMessage(e)));
+          }}
+          onSelectCase={(id, stepKey) => {
+            if (stepKey) {
+              selectComparedStep(id, stepKey);
+            } else {
+              setFilter("");
+              setActiveId(id);
+              requestAnimationFrame(() => {
+                detailRef.current?.scrollIntoView({ block: "start" });
+              });
+            }
+          }}
+        />
       )}
       {spec && (
         <TestDesignReviewPanel

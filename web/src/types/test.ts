@@ -139,6 +139,53 @@ export interface TestExecution {
   updated_at: string;
 }
 
+export interface QualitySummary {
+  version: string;
+  tests: number;
+  steps: number;
+  boundary_limits: number;
+  boundary_missing: number;
+  boundary_untested: number;
+  duplicates: number;
+  invented_messages: number;
+  borrowed_messages: number;
+}
+
+export interface QualityBoundaryItem {
+  requirement: string;
+  limit: string;
+  step_count: number;
+  missing: string[];
+}
+
+export interface QualityDuplicateItem {
+  kind: 'same_test' | 'whole_test';
+  count: number;
+  where: string[];
+}
+
+export interface QualityInventedItem {
+  requirements: string[];
+  message: string;
+  where: string;
+}
+
+export interface QualityBorrowedItem {
+  requirements: string[];
+  message: string;
+  found_in: string[];
+  where: string;
+}
+
+export interface QualityReport {
+  test_specification_id: string;
+  summary: QualitySummary;
+  boundary: QualityBoundaryItem[];
+  duplicates: QualityDuplicateItem[];
+  invented: QualityInventedItem[];
+  borrowed: QualityBorrowedItem[];
+}
+
 export interface TestSpecification {
   id: string;
   created_at?: string;

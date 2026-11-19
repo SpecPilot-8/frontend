@@ -41,6 +41,7 @@ import { TestGenerationDialog } from "../components/test/TestGenerationDialog";
 import { TestRequirementComparison } from "../components/test/TestRequirementComparison";
 import type { GenerationPreviewPlan } from "../components/test/TestGenerationDialog";
 import { currentDesign } from "../services/testEvidence";
+import { formatRunDate, formatRunStatus as runStatusLabel } from "../services/format";
 import type { TestRequirement } from "../services/testEvidence";
 import type {
   RequirementLink,
@@ -112,41 +113,6 @@ const sectionLabels = {
   mypage: "마이페이지",
   authorization: "권한",
   general: "기타 기능",
-};
-
-const formatRunDate = (isoString: string) => {
-  try {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return isoString;
-    const m = d.getMonth() + 1;
-    const day = d.getDate();
-    const h = String(d.getHours()).padStart(2, "0");
-    const min = String(d.getMinutes()).padStart(2, "0");
-    return `${m}월 ${day}일 ${h}:${min}`;
-  } catch {
-    return isoString;
-  }
-};
-
-const runStatusLabel = (status: string) => {
-  switch (status) {
-    case "completed":
-      return "완료";
-    case "running":
-      return "분석 중";
-    case "failed":
-      return "실패";
-    case "queued":
-      return "대기";
-    case "blocked":
-      return "미연결";
-    case "cancelled":
-      return "중단";
-    case "draft":
-      return "초안";
-    default:
-      return status;
-  }
 };
 
 export const TestSpecView: React.FC<{
@@ -1324,10 +1290,11 @@ export const TestSpecView: React.FC<{
         <Card
           title="시험 목록"
           description={`${visible.length}개 시험`}
-          className="min-w-0"
+          className="min-w-0 flex flex-col 2xl:h-[calc(100vh-11rem)] 2xl:min-h-120"
+          bodyClassName="flex-1 min-h-0 flex flex-col"
         >
           <label
-            className="block text-xs font-medium text-slate-500 mb-2"
+            className="block text-xs font-medium text-slate-500 mb-2 shrink-0"
             htmlFor="test-requirement-filter"
           >
             연결 요구사항
@@ -1335,7 +1302,7 @@ export const TestSpecView: React.FC<{
           <select
             id="test-requirement-filter"
             aria-label="시험 요구사항 필터"
-            className={inputClass}
+            className={inputClass + " shrink-0"}
             value={filter}
             disabled={editing || adding || busy}
             onChange={(e) => setFilter(e.target.value)}
@@ -1347,7 +1314,7 @@ export const TestSpecView: React.FC<{
               </option>
             ))}
           </select>
-          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-1 gap-2 max-h-48 2xl:max-h-[70vh] overflow-y-auto">
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-1 gap-2 max-h-48 2xl:max-h-none 2xl:flex-1 2xl:min-h-0 overflow-y-auto pr-1">
             {visible.map((c) => (
               <button
                 key={c.id}
@@ -1394,7 +1361,8 @@ export const TestSpecView: React.FC<{
             <Card
               title="시험 상세"
               description={active?.test_no}
-              className="min-w-0 @container"
+              className="min-w-0 @container flex flex-col lg:h-[calc(100vh-11rem)] lg:min-h-120"
+              bodyClassName="flex-1 min-h-0 overflow-y-auto pr-1"
               extra={
                 active && !adding ? (
                   editing ? (

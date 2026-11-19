@@ -1199,9 +1199,14 @@ export const AnalysisView: React.FC<{
         </div>
       )}
       {/* 좌측 원문 블록과 우측 요구사항 검토 영역 */}
-      <div className="grid xl:grid-cols-[320px_1fr] gap-5">
-        <Card title="문서 원문" description={`${blocks.length}개 블록`}>
-          <div className="space-y-3 mb-4 p-3 bg-slate-50/80 rounded-xl border border-slate-200/80">
+      <div className="grid xl:grid-cols-[320px_1fr] gap-5 items-start">
+        <Card
+          title="문서 원문"
+          description={`${blocks.length}개 블록`}
+          className="min-w-0 flex flex-col xl:h-[calc(100vh-11rem)] xl:min-h-120"
+          bodyClassName="flex-1 min-h-0 flex flex-col"
+        >
+          <div className="space-y-3 mb-4 p-3 bg-slate-50/80 rounded-xl border border-slate-200/80 shrink-0">
             {availablePages.length > 1 && (
               <div>
                 <label
@@ -1284,11 +1289,11 @@ export const AnalysisView: React.FC<{
 
           {source && (
             <>
-              <p className="text-sm whitespace-pre-wrap my-4 select-text bg-slate-50 p-2.5 rounded border border-slate-100">
+              <p className="text-sm whitespace-pre-wrap my-4 select-text bg-slate-50 p-2.5 rounded border border-slate-100 max-h-36 overflow-y-auto shrink-0">
                 {source.text}
               </p>
               <a
-                className="text-blue-600 text-sm font-medium hover:underline inline-block mb-3"
+                className="text-blue-600 text-sm font-medium hover:underline inline-block mb-3 shrink-0"
                 target="_blank"
                 rel="noreferrer"
                 href={`${BASE_URL}${base}/documents/${docId}/file#page=${source.location.index}`}
@@ -1298,18 +1303,18 @@ export const AnalysisView: React.FC<{
             </>
           )}
 
-          <hr className="my-3 border-slate-100" />
+          <hr className="my-3 border-slate-100 shrink-0" />
 
           <input
             aria-label="요구사항 검색"
-            className={field}
+            className={`${field} shrink-0`}
             placeholder="요구사항 검색"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
 
           {reqs.length > 0 && (
-            <div className="flex items-center justify-between py-2 px-1 text-xs border-b border-slate-200 mt-2 mb-2 bg-slate-50/60 rounded-md">
+            <div className="flex items-center justify-between py-2 px-1 text-xs border-b border-slate-200 mt-2 mb-2 bg-slate-50/60 rounded-md shrink-0">
               <label className="flex items-center gap-2 cursor-pointer font-medium text-slate-700 select-none">
                 <input
                   type="checkbox"
@@ -1335,7 +1340,7 @@ export const AnalysisView: React.FC<{
             </div>
           )}
 
-          <div className="mt-2 space-y-2 max-h-125 overflow-y-auto">
+          <div className="mt-2 space-y-2 max-h-125 xl:max-h-none xl:flex-1 xl:min-h-0 overflow-y-auto pr-1">
             {visibleReqs.map((r) => {
               const isApproved = r.review_status === "approved";
               const isChecked = checkedReqIds.has(r.id);
@@ -1398,8 +1403,11 @@ export const AnalysisView: React.FC<{
                 : "요구사항 편집"
               : selected?.title || "등록된 요구사항이 없습니다"
           }
+          className="min-w-0 flex flex-col xl:h-[calc(100vh-11rem)] xl:min-h-120"
+          bodyClassName="flex-1 min-h-0 flex flex-col"
         >
-          <div className="grid lg:grid-cols-2 gap-5 items-start">
+          <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+            <div className="grid lg:grid-cols-2 gap-5 items-start">
             <div className="min-w-0">
               {editing ? (
                 <form onSubmit={save} className="space-y-3">
@@ -1974,28 +1982,6 @@ export const AnalysisView: React.FC<{
                       );
                     })}
                   </div>
-                  <div className="flex flex-wrap items-center gap-2 pt-3 border-t border-slate-100">
-                    <Button
-                      onClick={() => startEdit(false)}
-                      disabled={busy}
-                      variant="secondary"
-                    >
-                      요구사항 편집
-                    </Button>
-                    <Button
-                      onClick={approve}
-                      disabled={busy || selected.review_status === "approved"}
-                      variant={
-                        selected.review_status === "approved"
-                          ? "secondary"
-                          : "primary"
-                      }
-                    >
-                      {selected.review_status === "approved"
-                        ? "✓ 검토 확정 완료"
-                        : "현재 요구사항 검토 확정"}
-                    </Button>
-                  </div>
                 </div>
               ) : (
                 <p className="text-sm text-slate-500">
@@ -2040,6 +2026,31 @@ export const AnalysisView: React.FC<{
               )}
             </section>
           </div>
+          </div>
+          {!editing && selected && (
+            <div className="shrink-0 flex flex-wrap items-center gap-2 pt-3 mt-3 border-t border-slate-100 bg-white">
+              <Button
+                onClick={() => startEdit(false)}
+                disabled={busy}
+                variant="secondary"
+              >
+                요구사항 편집
+              </Button>
+              <Button
+                onClick={approve}
+                disabled={busy || selected.review_status === "approved"}
+                variant={
+                  selected.review_status === "approved"
+                    ? "secondary"
+                    : "primary"
+                }
+              >
+                {selected.review_status === "approved"
+                  ? "✓ 검토 확정 완료"
+                  : "현재 요구사항 검토 확정"}
+              </Button>
+            </div>
+          )}
         </Card>
       </div>
     </div>

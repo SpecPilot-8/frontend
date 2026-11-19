@@ -15,6 +15,7 @@ interface CardProps {
   extra?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
+  bodyClassName?: string;
 }
 
 export const Card: React.FC<CardProps> = ({
@@ -23,11 +24,12 @@ export const Card: React.FC<CardProps> = ({
   extra,
   children,
   className = '',
+  bodyClassName = '',
 }) => {
   return (
     <div className={`bg-white border border-slate-200/80 rounded-2xl p-6 shadow-sm ${className}`}>
       {(title || description || extra) && (
-        <div className="flex items-start justify-between pb-3 mb-4 border-b border-slate-100">
+        <div className="flex items-start justify-between pb-3 mb-4 border-b border-slate-100 shrink-0">
           <div>
             {title && <h3 className="text-sm font-bold text-slate-900">{title}</h3>}
             {description && <p className="mt-0.5 text-[11px] text-slate-400">{description}</p>}
@@ -35,7 +37,7 @@ export const Card: React.FC<CardProps> = ({
           {extra && <div>{extra}</div>}
         </div>
       )}
-      <div>{children}</div>
+      <div className={bodyClassName}>{children}</div>
     </div>
   );
 };

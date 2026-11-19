@@ -25,7 +25,9 @@ import {
   APIError,
   BASE_URL,
 } from '../services/api';
-import { Button, Card, PageHeader, estimateJobCostUsd, formatUsd, getJobReusedCalls } from '../components/common';
+import { Button, Card, PageHeader } from '../components/common';
+import { formatDuration, formatRunDate, RUN_STATUS_LABELS as runStatusLabel } from '../services/format';
+import { estimateJobCostUsd, formatUsd, getJobReusedCalls } from '../services/usageMetrics';
 import { VerificationDetail } from '../components/verification/VerificationDetail';
 import { VerificationScopeDialog } from '../components/verification/VerificationScopeDialog';
 import { VerificationLoadingModal } from '../components/verification/VerificationLoadingModal';
@@ -40,31 +42,6 @@ interface Row { requirement_id: string; requirement_revision: number; stable_key
 interface RunInput { snapshot_id: string; requirement_versions: { requirement_id: string; revision: number }[]; model_config_version: number }
 interface Job { id: string; operation: string; status: string; duration_ms?: number; estimated_cost_usd?: number | null; result_ref?: { id: string }; error?: { message: string }; missing_features: { message: string }[]; usage?: Record<string, number>; analysis_metrics?: AnalysisMetrics }
 const labels: Record<string, string> = { implemented: '구현됨', partial: '부분 구현', mismatch: '불일치', not_found: '미구현 후보', needs_review: '확인 필요', not_statically_verifiable: '정적 검증 불가', not_run: '미분석' };
-const runStatusLabel: Record<string, string> = { completed: '완료', running: '분석 중', failed: '실패', queued: '대기', blocked: '미연결', cancelled: '중단' };
-// 실행 시각을 한국어 날짜와 시간으로 변환하는 로직
-const formatRunDate = (isoString: string) => {
-  try {
-    const d = new Date(isoString);
-    if (isNaN(d.getTime())) return isoString;
-    const m = d.getMonth() + 1;
-    const day = d.getDate();
-    const h = String(d.getHours()).padStart(2, '0');
-    const min = String(d.getMinutes()).padStart(2, '0');
-    return `${m}월 ${day}일 ${h}:${min}`;
-  } catch {
-    return isoString;
-  }
-};
-// 소요 시간을 분과 초 단위로 변환하는 로직
-const formatDuration = (ms: number) => {
-  const totalSec = Math.round(ms / 1000);
-  if (totalSec >= 60) {
-    const min = Math.floor(totalSec / 60);
-    const sec = totalSec % 60;
-    return sec > 0 ? `${min}분 ${sec}초` : `${min}분`;
-  }
-  return `${(ms / 1000).toFixed(1)}초`;
-};
 // 판정 상태별 배지 색상을 구분하는 로직
 const statusBadgeStyles: Record<string, string> = {
   implemented: 'bg-emerald-50 text-emerald-700 border-emerald-200',

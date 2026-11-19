@@ -53,8 +53,8 @@ export function TestRequirementComparison({projectId, versions, requirements, ca
     return (!search||`${r.requirement?.title} ${c.condition.text}`.toLowerCase().includes(search)) && (!attention || !c.selected.length&&!c.other.length || c.selected.length>0&&(dirty||item?.decision!=='adequate'));
   })})).filter(r=>!r.requirement||r.conditions.length);
   const selectedCondition = all.flatMap(r=>r.conditions.map(c=>({r,c}))).find(({r,c})=>r.version.requirement_id===target?.requirement_id&&r.version.revision===target?.requirement_revision&&c.condition.id===target?.condition_id);
-  return <aside aria-label="요구사항과 시험 대조" className="min-w-0 lg:sticky lg:top-4 lg:max-h-[calc(100vh-6rem)] lg:overflow-y-auto">
-    <Card title="요구사항·수락 조건 대조" description="시험 절차와 기대 결과를 옆에서 비교합니다." className="min-w-0">
+  return <aside aria-label="요구사항과 시험 대조" className="min-w-0">
+    <Card title="요구사항·수락 조건 대조" description="시험 절차와 기대 결과를 옆에서 비교합니다." className="min-w-0 flex flex-col lg:h-[calc(100vh-11rem)] lg:min-h-120" bodyClassName="flex-1 min-h-0 overflow-y-auto pr-1">
       <div className="space-y-3 text-sm leading-7 wrap-anywhere">
         <p className="text-xs text-slate-500">{test.test_no} · 절차 개정 {test.revision}</p>
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs leading-6"><p>사양서 전체 조건 {flat.length}개 중 시험 연결 {flat.filter(c=>c.selected.length||c.other.length).length}개</p><p>선택한 시험에 연결된 조건 {flat.filter(c=>c.selected.length).length}개</p></div>

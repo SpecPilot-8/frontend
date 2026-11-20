@@ -25,7 +25,7 @@ const labels: Record<string, string> = { implemented: '구현됨', partial: '부
 
 function describe(r: Reason) {
   if (r.kind === 'requirement_revised') return `요구사항 개정 ${r.before_revision} → ${r.after_revision}`;
-  return `판정 변화 ${labels[r.before_status || ''] || r.before_status} → ${labels[r.after_status || ''] || r.after_status}${r.requirement_key ? ` (${r.requirement_key})` : ''}`;
+  return `판정 변화 ${labels[r.before_status || ''] || r.before_status} → ${labels[r.after_status || ''] || r.after_status}${r.condition_key || r.requirement_key ? ` (${r.condition_key || r.requirement_key})` : ''}`;
 }
 
 interface Props { base: string; specId: string; revision: number; onSelectCase: (id: string) => void }

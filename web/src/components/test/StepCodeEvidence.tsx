@@ -63,9 +63,13 @@ export function StepCodeEvidence({ base, testCaseId, revision }: Props) {
       {step.conditions.map(c => <div key={c.condition_id} className="mt-2 text-sm">
         <p><span className={`text-xs font-semibold ${tone[c.status || ''] || 'text-slate-500'}`}>[{labels[c.status || ''] || '미판정'}]</span> <span className="text-xs text-slate-500">{c.requirement_key}</span> {c.condition_text}</p>
         {c.evidence.length ? <ul className="mt-1 pl-4 text-xs font-mono text-slate-600">
-          {c.evidence.map(ev => <li key={ev.id}>{isVsCodeEnvironment()
-            ? <button className="text-blue-600 underline underline-offset-2" onClick={() => jump(ev.file_path, ev.start_line, ev.end_line)}>{ev.file_path}:{ev.start_line}-{ev.end_line}</button>
-            : `${ev.file_path}:${ev.start_line}-${ev.end_line}`}</li>)}
+          {/* 패널이 좁아 전체 경로는 줄바꿈되며 읽기 어렵다. 파일 이름과 줄만 보이고 전체 경로는 마우스를 올리면 보인다. */}
+          {c.evidence.map(ev => {
+            const label = `${ev.file_path.split('/').pop()}:${ev.start_line}-${ev.end_line}`;
+            return <li key={ev.id} title={ev.file_path} className="wrap-anywhere">{isVsCodeEnvironment()
+              ? <button className="text-blue-600 underline underline-offset-2" onClick={() => jump(ev.file_path, ev.start_line, ev.end_line)}>{label}</button>
+              : label}</li>;
+          })}
         </ul> : <p className="mt-1 pl-4 text-xs text-slate-500">근거 코드 없음</p>}
       </div>)}
     </div>)}

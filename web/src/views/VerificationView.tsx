@@ -32,6 +32,7 @@ import { VerificationDetail } from '../components/verification/VerificationDetai
 import { VerificationScopeDialog } from '../components/verification/VerificationScopeDialog';
 import { VerificationLoadingModal } from '../components/verification/VerificationLoadingModal';
 import { VerificationComparePanel } from '../components/verification/VerificationComparePanel';
+import { ChangeImpactPanel } from '../components/verification/ChangeImpactPanel';
 import type { VerificationCompareResponse } from '../components/verification/VerificationComparePanel';
 import type { ScopeOptions, VerificationScope } from '../components/verification/VerificationScopeDialog';
 
@@ -75,6 +76,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
   const [pendingInput, setPendingInput] = useState<RunInput | null>(null);
   const [compareRunId, setCompareRunId] = useState('');
   const [compareData, setCompareData] = useState<VerificationCompareResponse | null>(null);
+  const [showImpact, setShowImpact] = useState(false);
   const [compareLoading, setCompareLoading] = useState(false);
   const [compareError, setCompareError] = useState('');
   const [onlyChanged, setOnlyChanged] = useState(false);
@@ -370,7 +372,10 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
           <input aria-label="추적표 검색" placeholder="기능·주제 검색" value={search} onChange={e => setSearch(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-800 bg-white shadow-2xs focus:outline-none focus:border-blue-500 w-52" />
           <select aria-label="판정 필터" value={filter} onChange={e => setFilter(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-white shadow-2xs focus:outline-none focus:border-blue-500"><option value="">전체</option>{Object.entries(labels).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select>
         </div>
-        <Button disabled={!runId || busy} onClick={exportTrace} className="whitespace-nowrap shadow-2xs">실행 전체 Excel 출력</Button>
+        <div className="flex items-center gap-2">
+          <Button variant="secondary" disabled={!runId || busy || run?.status !== 'completed'} onClick={() => setShowImpact(v => !v)} className="whitespace-nowrap shadow-2xs">변경 영향 확인</Button>
+          <Button disabled={!runId || busy} onClick={exportTrace} className="whitespace-nowrap shadow-2xs">실행 전체 Excel 출력</Button>
+        </div>
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2 mb-4 px-1">
         <div className="flex flex-wrap items-center gap-2">
@@ -388,6 +393,9 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
         </div>
         <p className="text-xs text-slate-400">Excel은 현재 검색·필터와 관계없이 선택한 검증 실행 전체를 출력합니다.</p>
       </div>
+      {showImpact && run?.snapshot_id && (
+        <ChangeImpactPanel key={runId} base={base} runId={runId} snapshotId={run.snapshot_id} onClose={() => setShowImpact(false)} />
+      )}
       {activeCompareRunId && (
         <VerificationComparePanel
           data={activeCompareData}

@@ -37,6 +37,8 @@ import { TestEvidenceDialog } from "../components/test/TestEvidenceDialog";
 import { TestStepDesignPanel } from "../components/test/TestStepDesignPanel";
 import { TestDesignReviewPanel } from "../components/test/TestDesignReviewPanel";
 import { TestQualityPanel } from "../components/test/TestQualityPanel";
+import { StepCodeEvidence } from "../components/test/StepCodeEvidence";
+import { TestRetestPanel } from "../components/test/TestRetestPanel";
 import { TestGenerationDialog } from "../components/test/TestGenerationDialog";
 import { TestRequirementComparison } from "../components/test/TestRequirementComparison";
 import type { GenerationPreviewPlan } from "../components/test/TestGenerationDialog";
@@ -1123,6 +1125,21 @@ export const TestSpecView: React.FC<{
         />
       )}
       {spec && (
+        <TestRetestPanel
+          key={`retest-${spec.id}-${spec.revision}`}
+          base={base}
+          specId={spec.id}
+          revision={spec.revision}
+          onSelectCase={(id) => {
+            setFilter("");
+            setActiveId(id);
+            requestAnimationFrame(() => {
+              detailRef.current?.scrollIntoView({ block: "start" });
+            });
+          }}
+        />
+      )}
+      {spec && (
         <TestDesignReviewPanel
           key={spec.id}
           review={
@@ -1533,6 +1550,11 @@ export const TestSpecView: React.FC<{
                           참고한 값입니다. 실제 수행 결과와 구분됩니다.
                         </p>
                       </details>
+                      <StepCodeEvidence
+                        base={base}
+                        testCaseId={active.id}
+                        revision={active.revision}
+                      />
                       {!!(
                         active.assumptions?.length || active.warnings?.length
                       ) && (

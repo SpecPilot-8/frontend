@@ -58,13 +58,19 @@ export const fetchRecentProjects = async (): Promise<RecentProject[]> => {
   try {
     const data = { items: await fetchAll<{ id: string; name: string; created_at: string; tech_stack?: string }>("/projects") };
     return data.items.map(
-      (p: { id: string; name: string; created_at: string; tech_stack?: string }) => ({
-        id: p.id,
-        name: p.name,
-        updatedAt: p.created_at.split("T")[0],
-        techStack: projectStackLabel(p.tech_stack),
-        status: "대기 중",
-      }),
+      (p: { id: string; name: string; created_at: string; tech_stack?: string }) => {
+        const created = new Date(p.created_at);
+        const createdDate = Number.isNaN(created.getTime())
+          ? p.created_at.split("T")[0]
+          : `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, "0")}-${String(created.getDate()).padStart(2, "0")}`;
+        return {
+          id: p.id,
+          name: p.name,
+          updatedAt: createdDate,
+          techStack: projectStackLabel(p.tech_stack),
+          status: "대기 중",
+        };
+      },
     );
   } catch (error) {
     console.error("프로젝트 목록 조회 실패:", error);

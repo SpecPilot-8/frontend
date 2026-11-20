@@ -10,6 +10,7 @@
 import { useEffect, useState } from 'react';
 import { Button } from '../common';
 import { api } from '../../services/api';
+import { formatRunDate } from '../../services/format';
 
 interface ImpactScreen {
   screen_key: string;
@@ -80,7 +81,7 @@ export function ChangeImpactPanel({ base, runId, snapshotId, onClose }: Props) {
     <div className="flex flex-wrap items-center gap-2">
       <select aria-label="비교할 코드 스냅샷" value={target} onChange={e => setTarget(e.target.value)} className="border border-slate-200 rounded-lg px-3 py-2 text-xs bg-white max-w-xs">
         <option value="">새 스냅샷 비교 안 함</option>
-        {snapshots.map(s => <option key={s.id} value={s.id}>스냅샷 {s.id.slice(0, 8)}{s.created_at ? ` · ${s.created_at.slice(0, 16).replace('T', ' ')}` : ''}</option>)}
+        {snapshots.map(s => <option key={s.id} value={s.id}>스냅샷 {s.id.slice(0, 8)}{s.created_at ? ` · ${formatRunDate(s.created_at)}` : ''}</option>)}
       </select>
       <select aria-label="고칠 파일 추가" value="" onChange={e => e.target.value && setPicked(p => [...new Set([...p, e.target.value])])} className="border border-slate-200 rounded-lg px-3 py-2 text-xs bg-white max-w-md">
         <option value="">고칠 파일 추가…</option>

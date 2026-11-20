@@ -149,16 +149,18 @@ export const HomeView: React.FC<HomeViewProps> = ({
                     ) : null}
                   </div>
 
-                  {project.techStack || project.lastOpened ? (
+                  {project.techStack || project.lastOpened || project.updatedAt ? (
                     <div className="flex items-center space-x-2 text-xs text-neutral-400">
                       {project.techStack ? (
                         <span>{String(project.techStack)}</span>
                       ) : null}
-                      {project.techStack && project.lastOpened ? (
+                      {project.techStack && (project.lastOpened || project.updatedAt) ? (
                         <span>·</span>
                       ) : null}
                       {project.lastOpened ? (
                         <span>마지막 작업: {String(project.lastOpened)}</span>
+                      ) : project.updatedAt ? (
+                        <span>생성일: {String(project.updatedAt)}</span>
                       ) : null}
                     </div>
                   ) : null}

@@ -345,7 +345,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
     <Card title="요구사항 추적표" description={run ? `실행 상태: ${runStatusLabel[run.status] || run.status}${run.model_config_snapshot?.model ? ` · 모델 ${run.model_config_snapshot.model}` : ''} · 스냅샷 ${run.snapshot_id}` : '아직 검증 실행이 없습니다'}>
       <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-slate-50/80 border border-slate-200/80 rounded-xl mb-3">
         <div className="flex flex-wrap items-center gap-2.5 flex-1 min-w-0">
-          <select aria-label="검증 실행 선택" value={runId} disabled={busy} onChange={e => { setRunId(e.target.value); setMessage(''); }} className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-white shadow-2xs focus:outline-none focus:border-blue-500 max-w-xs truncate">{runs.map(r => <option key={r.id} value={r.id}>{formatRunDate(r.created_at)} · {runStatusLabel[r.status] || r.status}</option>)}</select>
+          <select aria-label="검증 실행 선택" value={runId} disabled={busy} onChange={e => { setRunId(e.target.value); setShowImpact(false); setMessage(''); }} className="border border-slate-200 rounded-lg px-3 py-2 text-xs font-medium text-slate-700 bg-white shadow-2xs focus:outline-none focus:border-blue-500 max-w-xs truncate">{runs.map(r => <option key={r.id} value={r.id}>{formatRunDate(r.created_at)} · {runStatusLabel[r.status] || r.status}</option>)}</select>
           {runs.length > 1 && (
             <select
               aria-label="비교 기준 실행 선택"
@@ -393,7 +393,7 @@ export const VerificationView: React.FC<{ onNavigateStep: (step: StepId) => void
         </div>
         <p className="text-xs text-slate-400">Excel은 현재 검색·필터와 관계없이 선택한 검증 실행 전체를 출력합니다.</p>
       </div>
-      {showImpact && run?.snapshot_id && (
+      {showImpact && run?.status === 'completed' && run?.snapshot_id && (
         <ChangeImpactPanel key={runId} base={base} runId={runId} snapshotId={run.snapshot_id} onClose={() => setShowImpact(false)} />
       )}
       {activeCompareRunId && (
